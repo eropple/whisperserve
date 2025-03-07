@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Multi-tenant Whisper API service for speech-to-text transcription"
 authors = ["Ed Ropple <ed@edropple.com>"]
 license = "AGPL-3.0"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11.11"
