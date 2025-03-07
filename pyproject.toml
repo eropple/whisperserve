@@ -1,0 +1,51 @@
+[tool.poetry]
+name = "whisperserve"
+version = "0.1.0"
+description = "Multi-tenant Whisper API service for speech-to-text transcription"
+authors = ["Ed Ropple <ed@edropple.com>"]
+license = "AGPL-3.0"
+
+[tool.poetry.dependencies]
+python = "^3.11.11"
+fastapi = ">=0.115.11,<0.116.0"
+uvicorn = ">=0.34.0,<0.35.0"
+pydantic = ">=2.10.6,<3.0.0"
+sqlalchemy = ">=2.0.38,<3.0.0"
+asyncpg = ">=0.30.0,<0.31.0"
+alembic = ">=1.15.1,<2.0.0"
+python-jose = ">=3.4.0,<4.0.0"
+structlog = ">=25.1.0,<26.0.0"
+opentelemetry-api = ">=1.30.0,<2.0.0"
+opentelemetry-sdk = ">=1.30.0,<2.0.0"
+ffmpeg-python = ">=0.2.0,<0.3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.5"
+pytest-asyncio = "^0.25.3"
+black = "^25.1.0"
+isort = "^6.0.1"
+mypy = "^1.15.0"
+
+[tool.poetry.scripts]
+svc-up = "sh -c 'dotenvx load --env-file=.env.development -- tilt up'"
+svc-down = "sh -c 'dotenvx load --env-file=.env.development -- tilt down'"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false

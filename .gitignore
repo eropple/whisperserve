@@ -1,0 +1,18 @@
+.env.development
+.env.production
+.env.test
+.env.*.local
+
+tmp/
+temp/
+*.tmp
+*.swp
+*.swo
+~*
+*~
+*.log
+
+# python gitignores
+__pycache__
+*.py[cod]
+*$py.class
