@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: whisperserve-dev-temporal-pvc
+spec:
+  storageClassName: local-path
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisperserve-dev-temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whisperserve-dev-temporal
+  template:
+    metadata:
+      labels:
+        app: whisperserve-dev-temporal
+    spec:
+      containers:
+        - name: whisperserve-dev-temporal
+          image: whisperserve-dev/temporal-dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 7233
+            - containerPort: 8233
+
+          env:
+            - name: TEMPORAL_LOG_FORMAT
+              value: pretty
+          volumeMounts:
+            - name: whisperserve-dev-temporal-persistent-storage
+              mountPath: /srv/temporal
+      volumes:
+        - name: whisperserve-dev-temporal-persistent-storage
+          persistentVolumeClaim:
+            claimName: whisperserve-dev-temporal-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whisperserve-dev-temporal
+spec:
+  type: ClusterIP
+  selector:
+    app: whisperserve-dev-temporal
+  ports:
+    - port: 7233
+      targetPort: 7233
+      name: grpc
+    - port: 8233
+      targetPort: 8233
+      name: ui

@@ -2,26 +2,53 @@
 port_prefix = os.environ.get("TILT_PORT_PREFIX", "")
 run_mode = os.environ.get("TILT_RUNMODE", "")
 
-# Load k8s manifests
-k8s_yaml('_dev-env/k8s/postgres.yaml')
+# temporal builder
+docker_build('whisperserve-dev/temporal-dev',
+            context='./_dev-env/k8s/temporal',
+            dockerfile='./_dev-env/k8s/temporal/Dockerfile')
 
-# Set up port forwarding for PostgreSQL
+k8s_yaml('_dev-env/k8s/postgres/postgres.yaml')
+k8s_yaml('_dev-env/k8s/temporal/temporal.yaml')
+
 postgres_port = port_prefix + "10"
 k8s_resource(
-    'postgres', 
-    port_forwards=[postgres_port + ":5432"],
-    labels=["svc"]
+    'whisperserve-dev-postgres', 
+    port_forwards=[port_prefix + "10:5432"],
+    labels=["98-svc"]
 )
+k8s_resource('whisperserve-dev-temporal', port_forwards=[port_prefix + '30:7233', port_prefix + '31:8233'], labels=["98-svc"])
+
+
+
+local_resource("wait-for-postgres",
+    allow_parallel=True,
+    cmd="bash ./_dev-env/wait-for-postgres.bash",
+    resource_deps=["whisperserve-dev-postgres"],
+    labels=["99-meta"])
+
+local_resource("wait-for-temporal",
+    allow_parallel=True,
+    cmd="bash ./_dev-env/wait-for-temporal.bash",
+    resource_deps=["whisperserve-dev-temporal"],
+    labels=["99-meta"])
+
+local_resource("wait-for-dependencies",
+    cmd="echo 'Dependencies OK'",
+    resource_deps=[
+        "wait-for-postgres",
+        "wait-for-temporal",
+    ],
+    labels=["99-meta"])
 
 if run_mode == "dev-in-tilt":
     app_port = port_prefix + "00"
     # Run the application as a local_resource
     local_resource(
         'whisperserve',
-        cmd="cd whisperserve && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port " + app_port,
-        serve_cmd="cd whisperserve && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port " + app_port,
+        cmd="true",
+        # serve_cmd="cd whisperserve && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port " + app_port,
         links=["http://localhost:" + app_port],
-        deps=["postgres"],
+        deps=["wait-for-dependencies"],
         allow_parallel=True,
         labels=["app"]
     )

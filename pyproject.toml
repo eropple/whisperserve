@@ -4,10 +4,11 @@ version = "0.1.0"
 description = "Multi-tenant Whisper API service for speech-to-text transcription"
 authors = ["Ed Ropple <ed@edropple.com>"]
 license = "AGPL-3.0"
-package-mode = false
+package-mode = true
+packages = [{include = "app"}]
 
 [tool.poetry.dependencies]
-python = "^3.11.11"
+python = ">=3.11.11,<3.12.0"
 fastapi = ">=0.115.11,<0.116.0"
 uvicorn = ">=0.34.0,<0.35.0"
 pydantic = ">=2.10.6,<3.0.0"
@@ -19,6 +20,14 @@ structlog = ">=25.1.0,<26.0.0"
 opentelemetry-api = ">=1.30.0,<2.0.0"
 opentelemetry-sdk = ">=1.30.0,<2.0.0"
 ffmpeg-python = ">=0.2.0,<0.3.0"
+aiohttp = "^3.11.13"
+aiofiles = "^24.1.0"
+pytest = "^8.3.5"
+pytest-asyncio = "^0.25.3"
+whisperx = "^3.3.1"
+torch = "^2.6.0"
+numpy = "^2.2.3"
+click = "^8.1.8"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
@@ -28,8 +37,7 @@ isort = "^6.0.1"
 mypy = "^1.15.0"
 
 [tool.poetry.scripts]
-svc-up = "sh -c 'dotenvx load --env-file=.env.development -- tilt up'"
-svc-down = "sh -c 'dotenvx load --env-file=.env.development -- tilt down'"
+whisperserve = "app.cli:main"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
@@ -50,3 +58,7 @@ strict_optional = true
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"

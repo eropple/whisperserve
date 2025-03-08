@@ -141,10 +141,10 @@ async def process_job(job_id: str, model):
 
 ### Pluggable Model Backends
 The service needs to support multiple Whisper implementations:
-1. PyTorch Whisper - for AMD GPUs and Apple Metal
-2. Faster Whisper - for NVIDIA GPUs with optimal performance
-3. whisper.cpp - for CPU-optimized deployment
-4. Mock/Static backend - for testing (returns predetermined transcriptions)
+1. WhisperX CPU - for CPU-based processing (uses faster-whisper under the hood)
+2. WhisperX CUDA - for NVIDIA GPUs
+3. Mock/Static backend - for testing (returns predetermined transcriptions)
+4. (Future) PyTorch or whisper.cpp - for AMD GPUs and Apple Metal (CTranslate2 might get ROCm and Metal/MPS support first)
 
 ### Configuration
 - Server-level backend selection (PyTorch Whisper, Faster Whisper, whisper.cpp, mock)
@@ -230,6 +230,46 @@ CREATE TABLE jobs (
 CREATE INDEX idx_jobs_status_tenant ON jobs (status, tenant_id, created_at) 
     WHERE status = 'pending';
 ```
+
+### SQLAlchemy Type Checking with Pylance/mypy
+
+SQLAlchemy presents unique challenges for static type checkers like Pylance and mypy due to its dual-nature API: Column objects are defined at the class level but operate as values at runtime. This causes type errors in expressions like:
+
+```python
+# Type error: Job.state is seen as a Column, not a value that can be compared
+stmt = select(Job).where(Job.state == JobState.PENDING)
+```
+
+**Common Errors:**
+- "Variable not allowed in type expression" (with TypeVar bounds)
+- "Argument of type 'Column[X]' cannot be assigned to parameter of type 'X'"
+- "Type 'bool' is not assignable to type 'ColumnElement[bool]'" (in and_/or_ clauses)
+
+**Best Solutions:**
+1. **Use cast() for SQLAlchemy expressions:**
+   ```python
+   # Explicit cast to ColumnElement[bool] for type checker
+   pending_clause = cast(ColumnElement[bool], Job.state == JobState.PENDING)
+   stmt = select(Job).where(pending_clause)
+   ```
+
+2. **Use explicit variable typing for runtime values:**
+   ```python
+   # When using Column attributes as values
+   value = cast(int, job.attempt_count) + 1
+   ```
+
+3. **For model definitions, avoid Column type annotations:**
+   ```python
+   # Don't do this - confuses type checkers:
+   id: Column = Column(UUID(...))
+
+   # Better - let SQLAlchemy's runtime behavior work:
+   id = Column(UUID(...))
+   ```
+
+These patterns keep code type-safe while avoiding excessive type ignores or compromising on static analysis. SQLAlchemy 2.0 has improved typing support, but explicit casts are still often needed for complex expressions.
+
 
 ## Testing Requirements
 - Complete unit test coverage using the mock backend

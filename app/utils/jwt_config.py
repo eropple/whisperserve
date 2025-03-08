@@ -4,7 +4,7 @@ from typing import Dict, Any
 from jose import jwk
 from pydantic import BaseModel, Field, field_validator
 
-from app.utils.config_utils import get_env_value, get_env_int
+from app.utils.config_utils import get_env_str, get_env_value, get_env_int
 
 
 class JWTConfig(BaseModel):
@@ -21,7 +21,7 @@ def load_jwt_config() -> JWTConfig:
     
     JWT__JWKS should contain a JSON Web Key Set (JWKS) string with public keys.
     """
-    jwks_str = get_env_value("JWT__JWKS", required=True)
+    jwks_str = get_env_str("JWT__JWKS")
     
     # If it's a file reference, load from file
     if jwks_str.startswith("file:"):
@@ -62,11 +62,11 @@ def load_jwt_config() -> JWTConfig:
         raise ValueError(f"Failed to parse JWKS: {str(e)}")
     
     # Default to ES256 (ECDSA with P-256 and SHA-256) 
-    algorithm = get_env_value("JWT__ALGORITHM", "ES256")
+    algorithm = get_env_str("JWT__ALGORITHM", "ES256")
     
     return JWTConfig(
         public_keys=public_keys,
         algorithm=algorithm,
-        tenant_claim=get_env_value("JWT__TENANT_CLAIM", "tenant_id"),
+        tenant_claim=get_env_str("JWT__TENANT_CLAIM", "tenant_id"),
         expiration_minutes=get_env_int("JWT__EXPIRATION_MINUTES", 60)
     )

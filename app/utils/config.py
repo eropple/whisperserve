@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field, PostgresDsn, field_validator, model_valid
 
 from app.utils.jwt_config import JWTConfig, load_jwt_config
 from app.utils.config_utils import (
-    get_env_value, get_env_bool, get_env_int, get_env_float
+    get_env_str, get_env_value, get_env_bool, get_env_int, get_env_float
 )
 
 # Type definitions
@@ -19,25 +19,18 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class BackendType(str, Enum):
-    PYTORCH = "pytorch"
-    FASTER_WHISPER = "faster_whisper"
-    WHISPER_CPP = "whisper.cpp"
-    MOCK = "mock"
-
-
 class HardwareAcceleration(str, Enum):
     CPU = "cpu"
     CUDA = "cuda"
     ROCM = "rocm"
     METAL = "metal"
+    MOCK = "mock"
 
 
 class ModelConfig(BaseModel):
-    backend: BackendType = Field(default=BackendType.PYTORCH, description="Whisper implementation to use")
+    acceleration: HardwareAcceleration = Field(default=HardwareAcceleration.CPU, description="Hardware acceleration type")
     model_size: str = Field(default="base", description="Model size (tiny, base, small, medium, large)")
     model_path: Optional[str] = Field(default=None, description="Custom path to model files")
-    acceleration: HardwareAcceleration = Field(default=HardwareAcceleration.CPU, description="Hardware acceleration type")
     cache_dir: str = Field(default="/tmp/whisperserve/models", description="Directory to cache model files")
 
 
@@ -45,6 +38,7 @@ class DatabaseConfig(BaseModel):
     dsn: PostgresDsn = Field(..., description="PostgreSQL connection string")
     min_connections: int = Field(default=5, description="Minimum number of connections in the pool")
     max_connections: int = Field(default=20, description="Maximum number of connections in the pool")
+    echo_queries: bool = Field(default=False, description="Enable SQL query logging")
 
 
 class LoggingConfig(BaseModel):
@@ -57,6 +51,13 @@ class OpenTelemetryConfig(BaseModel):
     endpoint: Optional[str] = Field(default=None, description="OpenTelemetry collector endpoint")
     service_name: str = Field(default="whisperserve", description="Service name for OpenTelemetry")
 
+class TemporalConfig(BaseModel):
+    """Configuration for Temporal workflow engine."""
+    server_url: str = Field(default="whisperserve-dev-temporal:7233", description="Address of the Temporal server")
+    namespace: str = Field(default="default", description="Temporal namespace")
+    enable_tls: bool = Field(default=False, description="Whether to use TLS for Temporal connection")
+    task_queue: str = Field(default="transcription-queue", description="Default task queue for workflows")
+    workflow_id_prefix: str = Field(default="transcription-", description="Prefix for workflow IDs")
 
 class ServerConfig(BaseModel):
     host: str = Field(default="0.0.0.0", description="Server host")
@@ -74,6 +75,7 @@ class AppConfig(BaseModel):
     jwt: JWTConfig
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     telemetry: OpenTelemetryConfig = Field(default_factory=OpenTelemetryConfig)
+    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
 
 
 def load_server_config() -> ServerConfig:
@@ -81,7 +83,7 @@ def load_server_config() -> ServerConfig:
     Load server configuration from environment variables.
     """
     return ServerConfig(
-        host=get_env_value("SERVER__HOST", "0.0.0.0"),
+        host=get_env_str("SERVER__HOST", "0.0.0.0"),
         port=get_env_int("SERVER__PORT", 8000),
         workers=get_env_int("SERVER__WORKERS", 1),
         job_polling_interval=get_env_float("SERVER__JOB_POLLING_INTERVAL", 1.0),
@@ -89,15 +91,28 @@ def load_server_config() -> ServerConfig:
         max_retries=get_env_int("SERVER__MAX_RETRIES", 3)
     )
 
+def load_temporal_config() -> TemporalConfig:
+    """
+    Load Temporal configuration from environment variables.
+    """
+    return TemporalConfig(
+        server_url=get_env_str("TEMPORAL__SERVER_URL"),
+        namespace=get_env_str("TEMPORAL__NAMESPACE"),
+        enable_tls=get_env_bool("TEMPORAL__ENABLE_TLS"),
+        task_queue=get_env_str("TEMPORAL__TASK_QUEUE"),
+        workflow_id_prefix=get_env_str("TEMPORAL__WORKFLOW_ID_PREFIX", "transcription-")
+    )
 
 def load_database_config() -> DatabaseConfig:
     """
     Load database configuration from environment variables.
     """
     return DatabaseConfig(
-        dsn=get_env_value("DATABASE__DSN", required=True),
+        # cast to PostgresDsn to ensure it's a valid Postgres connection string
+        dsn=PostgresDsn(get_env_str("DATABASE__DSN")),
         min_connections=get_env_int("DATABASE__MIN_CONNECTIONS", 5),
-        max_connections=get_env_int("DATABASE__MAX_CONNECTIONS", 20)
+        max_connections=get_env_int("DATABASE__MAX_CONNECTIONS", 20),
+        echo_queries=get_env_bool("DATABASE__ECHO_QUERIES", False)
     )
 
 
@@ -105,14 +120,6 @@ def load_model_config() -> ModelConfig:
     """
     Load model configuration from environment variables.
     """
-    # Get backend value and validate it's a valid enum value
-    backend_str = get_env_value("MODEL__BACKEND", "pytorch")
-    try:
-        backend = BackendType(backend_str)
-    except ValueError:
-        valid_values = ", ".join([e.value for e in BackendType])
-        raise ValueError(f"Invalid MODEL__BACKEND value: {backend_str}. Must be one of: {valid_values}")
-    
     # Get acceleration value and validate it's a valid enum value
     accel_str = get_env_value("MODEL__ACCELERATION", "cpu")
     try:
@@ -122,11 +129,10 @@ def load_model_config() -> ModelConfig:
         raise ValueError(f"Invalid MODEL__ACCELERATION value: {accel_str}. Must be one of: {valid_values}")
     
     return ModelConfig(
-        backend=backend,
-        model_size=get_env_value("MODEL__MODEL_SIZE", "base"),
-        model_path=get_env_value("MODEL__MODEL_PATH"),
+        model_size=get_env_str("MODEL__MODEL_SIZE", "base"),
+        model_path=get_env_str("MODEL__MODEL_PATH"),
         acceleration=acceleration,
-        cache_dir=get_env_value("MODEL__CACHE_DIR", "/tmp/whisperserve/models")
+        cache_dir=get_env_str("MODEL__CACHE_DIR", "/tmp/whisperserve/models")
     )
 
 
@@ -154,7 +160,7 @@ def load_telemetry_config() -> OpenTelemetryConfig:
     return OpenTelemetryConfig(
         enabled=get_env_bool("TELEMETRY__ENABLED", False),
         endpoint=get_env_value("TELEMETRY__ENDPOINT"),
-        service_name=get_env_value("TELEMETRY__SERVICE_NAME", "whisperserve")
+        service_name=get_env_str("TELEMETRY__SERVICE_NAME", "whisperserve")
     )
 
 
@@ -169,7 +175,8 @@ def load_config() -> AppConfig:
             model=load_model_config(),
             jwt=load_jwt_config(),
             logging=load_logging_config(),
-            telemetry=load_telemetry_config()
+            telemetry=load_telemetry_config(),
+            temporal=load_temporal_config()
         )
         return config
     except ValueError as e:
