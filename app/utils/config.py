@@ -53,7 +53,7 @@ class OpenTelemetryConfig(BaseModel):
 
 class TemporalConfig(BaseModel):
     """Configuration for Temporal workflow engine."""
-    server_url: str = Field(default="whisperserve-dev-temporal:7233", description="Address of the Temporal server")
+    server_address: str = Field(default="whisperserve-dev-temporal:7233", description="Address of the Temporal server")
     namespace: str = Field(default="default", description="Temporal namespace")
     enable_tls: bool = Field(default=False, description="Whether to use TLS for Temporal connection")
     task_queue: str = Field(default="transcription-queue", description="Default task queue for workflows")
@@ -96,8 +96,8 @@ def load_temporal_config() -> TemporalConfig:
     Load Temporal configuration from environment variables.
     """
     return TemporalConfig(
-        server_url=get_env_str("TEMPORAL__SERVER_URL"),
-        namespace=get_env_str("TEMPORAL__NAMESPACE"),
+        server_address=get_env_str("TEMPORAL__SERVER_ADDRESS"),
+        namespace=get_env_str("TEMPORAL__NAMESPACE", "default"),
         enable_tls=get_env_bool("TEMPORAL__ENABLE_TLS"),
         task_queue=get_env_str("TEMPORAL__TASK_QUEUE"),
         workflow_id_prefix=get_env_str("TEMPORAL__WORKFLOW_ID_PREFIX", "transcription-")
@@ -130,7 +130,6 @@ def load_model_config() -> ModelConfig:
     
     return ModelConfig(
         model_size=get_env_str("MODEL__MODEL_SIZE", "base"),
-        model_path=get_env_str("MODEL__MODEL_PATH"),
         acceleration=acceleration,
         cache_dir=get_env_str("MODEL__CACHE_DIR", "/tmp/whisperserve/models")
     )

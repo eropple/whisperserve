@@ -191,13 +191,7 @@ fi
 echo "📝 Checking Poetry installation..."
 if ! command -v poetry &> /dev/null; then
     echo "⬇️ Installing Poetry..."
-    curl -sSL https://install.python-poetry.org | python3 -
-    
-    # Add Poetry to PATH if not already there
-    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-        export PATH="$HOME/.local/bin:$PATH"
-    fi
+    pip install poetry
 else
     echo "✅ Poetry already installed"
 fi

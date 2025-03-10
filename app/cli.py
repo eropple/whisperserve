@@ -1,29 +1,27 @@
 #!/usr/bin/env python
 import asyncio
 import logging
-import os
 import signal
 import sys
-from typing import Optional
+from typing import Optional, TypedDict, Dict, Any
 
 import click
-import uvicorn
 import structlog
-from fastapi import FastAPI
 
-from app.utils.config import load_config, AppConfig
-from app.db.engine import init_db, get_engine
-from app.worker.backends.mock import MockBackend
-from app.worker.backends.whisperx_cpu_backend import WhisperXBackend
-from app.worker.processor import JobProcessor
-from app.utils.config import BackendType, HardwareAcceleration
+from app.utils.config import load_config, AppConfig, LogLevel
+from app.api.runner import run_api_server, create_server
+from app.worker.runner import create_worker, run_worker
 
+# Define a type for our Click context object
+class ClickContext(TypedDict):
+    config: AppConfig
+    logger: structlog.BoundLogger
 
 # Shared state for signal handling
 shutdown_event = asyncio.Event()
 
 # Set up logging
-def configure_logging(config):
+def configure_logging(config: AppConfig) -> structlog.BoundLogger:
     """Configure logging based on application configuration."""
     # Set up structlog
     structlog.configure(
@@ -42,7 +40,7 @@ def configure_logging(config):
     
     return structlog.get_logger()
 
-def handle_sigterm(signum, frame):
+def handle_sigterm(signum: int, frame: Any) -> None:
     """Handle SIGTERM signal by setting shutdown event."""
     print("Received SIGTERM. Initiating graceful shutdown...")
     shutdown_event.set()
@@ -55,7 +53,7 @@ signal.signal(signal.SIGINT, handle_sigterm)
 @click.group()
 @click.option('--log-level', default=None, help='Override log level from config')
 @click.pass_context
-def cli(ctx, log_level):
+def cli(ctx: click.Context, log_level: Optional[str]) -> None:
     """WhisperServe: Multi-tenant Speech-to-Text API Service.
     
     This command line tool allows you to run WhisperServe in various modes.
@@ -65,11 +63,17 @@ def cli(ctx, log_level):
     
     # Override log level if specified
     if log_level:
-        config.logging.level = log_level
+        try:
+            # Convert string to LogLevel enum
+            config.logging.level = LogLevel(log_level.upper())
+        except ValueError:
+            valid_levels = [level.value for level in LogLevel]
+            print(f"Invalid log level: {log_level}. Valid options are: {', '.join(valid_levels)}")
+            sys.exit(1)
     
     # Store config in context for subcommands
     ctx.ensure_object(dict)
-    ctx.obj['config'] = config
+    ctx.obj = {'config': config}
     
     # Configure logging
     logger = configure_logging(config)
@@ -82,100 +86,34 @@ def cli(ctx, log_level):
 @click.option('--host', help='Override API host from config')
 @click.option('--port', type=int, help='Override API port from config')
 @click.pass_context
-def api(ctx, host, port):
+def api(ctx: click.Context, host: Optional[str], port: Optional[int]) -> None:
     """Run the API server only."""
-    config = ctx.obj['config']
-    logger = ctx.obj['logger']
+    obj: Dict[str, Any] = ctx.obj
+    config: AppConfig = obj['config']
+    logger: structlog.BoundLogger = obj['logger']
     
-    # Override host/port if specified
-    if host:
-        config.server.host = host
-    if port:
-        config.server.port = port
-    
-    logger.info("starting_api_server", 
-                host=config.server.host, 
-                port=config.server.port)
-    
-    from app.main import create_app
-    
-    # Initialize database
-    init_db(config.database)
-    
-    # Create FastAPI app
-    app = create_app(config)
-    
-    # Run with uvicorn
-    uvicorn.run(
-        app,
-        host=config.server.host,
-        port=config.server.port,
-        log_level=config.logging.level.value.lower()
-    )
+    # Run API server (this will block until server stops)
+    run_api_server(config, logger, host, port)
 
 
 @cli.command()
 @click.option('--worker-id', help='Unique ID for this worker')
 @click.pass_context
-async def worker(ctx, worker_id):
+async def worker(ctx: click.Context, worker_id: Optional[str]) -> None:
     """Run the worker process only."""
-    config = ctx.obj['config']
-    logger = ctx.obj['logger']
+    obj: Dict[str, Any] = ctx.obj
+    config: AppConfig = obj['config']
+    logger: structlog.BoundLogger = obj['logger']
     
-    # Generate worker ID if not provided
-    if not worker_id:
-        import uuid
-        worker_id = f"worker-{uuid.uuid4()}"
+    # Create the worker
+    processor, _ = create_worker(config, logger, worker_id)
     
-    logger.info("starting_worker", worker_id=worker_id)
-    
-    # Initialize database
-    init_db(config.database)
-    
-    # Create appropriate backend based on configuration
-    if config.model.backend == BackendType.MOCK:
-        logger.info("using_mock_backend")
-        backend = MockBackend(model_size=config.model.model_size)
-    elif config.model.backend == BackendType.PYTORCH:
-        if config.model.acceleration == HardwareAcceleration.CPU:
-            logger.info("using_whisperx_cpu_backend", model_size=config.model.model_size)
-            backend = WhisperXBackend(config.model)
-        else:
-            # TODO: Implement other backends
-            logger.error("unsupported_acceleration", acceleration=config.model.acceleration)
-            raise ValueError(f"Unsupported acceleration: {config.model.acceleration}")
-    else:
-        # TODO: Implement other backends
-        logger.error("unsupported_backend_type", backend=config.model.backend)
-        raise ValueError(f"Unsupported backend type: {config.model.backend}")
-    
-    # Create job processor
-    processor = JobProcessor(
-        model_backend=backend,
-        server_config=config.server,
-        worker_id=worker_id
-    )
-    
-    # Start processor and handle shutdown
+    # Run the worker until shutdown
     try:
-        # Create task for the processor
-        processor_task = asyncio.create_task(processor.start())
-        
-        # Wait for shutdown signal
-        await shutdown_event.wait()
-        
-        # Stop processor gracefully
-        logger.info("shutting_down_worker")
-        await processor.stop()
-        
-        # Wait for processor to complete shutdown
-        await processor_task
-        
+        await run_worker(processor, logger, shutdown_event)
     except Exception as e:
-        logger.exception("worker_error", error=str(e))
+        logger.exception("worker_run_error", error=str(e))
         sys.exit(1)
-    
-    logger.info("worker_shutdown_complete")
 
 
 @cli.command()
@@ -183,69 +121,25 @@ async def worker(ctx, worker_id):
 @click.option('--port', type=int, help='Override API port from config')
 @click.option('--worker-id', help='Unique ID for worker component')
 @click.pass_context
-async def combined(ctx, host, port, worker_id):
+async def combined(ctx: click.Context, host: Optional[str], port: Optional[int], worker_id: Optional[str]) -> None:
     """Run both API server and worker in the same process."""
-    config = ctx.obj['config']
-    logger = ctx.obj['logger']
-    
-    # Override host/port if specified
-    if host:
-        config.server.host = host
-    if port:
-        config.server.port = port
-    
-    # Generate worker ID if not provided
-    if not worker_id:
-        import uuid
-        worker_id = f"worker-{uuid.uuid4()}"
+    obj: Dict[str, Any] = ctx.obj
+    config: AppConfig = obj['config']
+    logger: structlog.BoundLogger = obj['logger']
     
     logger.info("starting_combined_mode", 
-                host=config.server.host, 
-                port=config.server.port,
+                host=host or config.server.host, 
+                port=port or config.server.port,
                 worker_id=worker_id)
     
-    # Initialize database
-    init_db(config.database)
+    # Create worker
+    processor, _ = create_worker(config, logger, worker_id)
     
-    # Create appropriate backend based on configuration
-    if config.model.backend == BackendType.MOCK:
-        logger.info("using_mock_backend")
-        backend = MockBackend(model_size=config.model.model_size)
-    elif config.model.backend == BackendType.PYTORCH:
-        if config.model.acceleration == HardwareAcceleration.CPU:
-            logger.info("using_whisperx_cpu_backend", model_size=config.model.model_size)
-            backend = WhisperXBackend(config.model)
-        else:
-            logger.error("unsupported_acceleration", acceleration=config.model.acceleration)
-            raise ValueError(f"Unsupported acceleration: {config.model.acceleration}")
-    else:
-        logger.error("unsupported_backend_type", backend=config.model.backend)
-        raise ValueError(f"Unsupported backend type: {config.model.backend}")
-    
-    # Create job processor
-    processor = JobProcessor(
-        model_backend=backend,
-        server_config=config.server,
-        worker_id=worker_id
-    )
-    
-    # Create FastAPI app
-    from app.main import create_app
-    app = create_app(config)
+    # Create API server (but don't start it yet)
+    server = await create_server(config, logger, host, port)
     
     # Start processor
     processor_task = asyncio.create_task(processor.start())
-    
-    # Configure Uvicorn for ASGI server
-    config = uvicorn.Config(
-        app,
-        host=config.server.host,
-        port=config.server.port,
-        log_level=config.logging.level.value.lower()
-    )
-    
-    # Create server
-    server = uvicorn.Server(config)
     
     # Handle shutdown
     async def shutdown():
@@ -284,7 +178,7 @@ async def combined(ctx, host, port, worker_id):
 @click.argument('subcommand', required=True)
 @click.argument('args', nargs=-1)
 @click.pass_context
-def run_async(ctx, subcommand, args):
+def run_async(ctx: click.Context, subcommand: str, args: tuple) -> None:
     """Run an async subcommand with the event loop."""
     # Create new event loop
     loop = asyncio.new_event_loop()
@@ -307,7 +201,7 @@ def run_async(ctx, subcommand, args):
 
 
 # Main entry point that wraps async commands
-def main():
+def main() -> None:
     """Main entry point for the CLI."""
     if len(sys.argv) > 1 and sys.argv[1] in ['worker', 'combined']:
         # For async commands, use run_async wrapper

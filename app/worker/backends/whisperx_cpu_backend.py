@@ -35,7 +35,7 @@ class WhisperXCPUBackend(ModelBackend):
         self.log = logger.bind(backend="whisperx", model_size=config.model_size)
         
         # Use the model path if provided, otherwise use cache_dir
-        self.download_root = config.model_path or config.cache_dir
+        self.download_root = config.cache_dir
         
         # Default to CPU device
         self.device = "cpu"
