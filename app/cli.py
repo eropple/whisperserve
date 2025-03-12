@@ -178,6 +178,69 @@ def combined(ctx: click.Context, host: Optional[str], port: Optional[int], worke
     finally:
         loop.close()
 
+@cli.command()
+@click.argument('audio_file', type=click.Path(exists=True))
+@click.option('--language', help='Override language detection')
+@click.option('--model-size', help='Override model size from config')
+@click.pass_context
+def transcribe(ctx: click.Context, audio_file: str, language: Optional[str] = None, 
+                model_size: Optional[str] = None):
+    """Transcribe an audio file using the configured backend and output as JSON."""
+    import json
+    from app.worker.backends.factory import create_backend
+    
+    # Get config and logger from context
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
+    
+    # Override model size if specified
+    if model_size:
+        config.model.model_size = model_size
+    
+    # Create event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    # Define the async function that will do the work
+    async def run_transcription():
+        logger.info("initializing_backend")
+        
+        # Create backend from factory
+        backend = create_backend(config, logger)
+        
+        # Initialize backend
+        if not await backend.initialize():
+            logger.error("backend_initialization_failed")
+            sys.exit(1)
+        
+        try:
+            logger.info("starting_transcription", file=audio_file)
+            
+            # Set options
+            options = {"processing_mode": "downmix"}
+            if language:
+                options["language"] = language
+            
+            # Run transcription
+            result = await backend.transcribe(audio_file, options)
+            
+            # Print result as JSON
+            print(json.dumps(result.to_dict(), indent=2))
+            
+        finally:
+            await backend.shutdown()
+    
+    try:
+        # Run the async function
+        loop.run_until_complete(run_transcription())
+    except Exception as e:
+        logger.exception("transcription_failed", error=str(e))
+        sys.exit(1)
+    finally:
+        loop.close()
+
+
+
 def main():
     """Main entry point for the CLI."""
     cli()

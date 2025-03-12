@@ -8,6 +8,7 @@ from temporalio import activity
 
 from app.logging import get_logger
 from app.utils.config import load_config
+from app.worker.backends.factory import create_backend
 from app.worker.models import TranscribeMediaInput, TranscribeMediaOutput
 
 @activity.defn
@@ -64,30 +65,28 @@ async def transcribe_media(input_data: TranscribeMediaInput) -> TranscribeMediaO
         if input_data.track_index is not None:
             options["track_index"] = input_data.track_index
 
-        raise NotImplementedError("TBD")
+        # Here you would create and use the appropriate backend based on config
+        # For now, we'll use a mock backend
+        backend = create_backend(config, logger)
+        await backend.initialize()
         
-        # # Here you would create and use the appropriate backend based on config
-        # # For now, we'll use a mock backend
-        # backend = MockBackend(model_size="base")
-        # await backend.initialize()
+        # Process with the model backend
+        result = await backend.transcribe(audio_path=local_path, options=options)
         
-        # # Process with the model backend
-        # result = await backend.transcribe(audio_path=local_path, options=options)
+        processing_time = time.time() - start_time
+        logger.info("transcription_completed", 
+                    duration=result.duration,
+                    processing_time=processing_time,
+                    language=result.language)
         
-        # processing_time = time.time() - start_time
-        # logger.info("transcription_completed", 
-        #             duration=result.duration,
-        #             processing_time=processing_time,
-        #             language=result.language)
-        
-        # # Return the result
-        # return TranscribeMediaOutput(
-        #     text=result.text,
-        #     segments=result.segments,
-        #     language=result.language,
-        #     duration=result.duration,
-        #     processing_time=processing_time
-        # )
+        # Return the result
+        return TranscribeMediaOutput(
+            text=result.text,
+            segments=result.segments,
+            language=result.language,
+            duration=result.duration,
+            processing_time=processing_time
+        )
     
     except Exception as e:
         logger.exception("transcription_failed", error=str(e))
