@@ -10,35 +10,15 @@ import structlog
 
 from app.utils.config import load_config, AppConfig, LogLevel
 from app.api.runner import run_api_server, create_server
-from app.worker.runner import create_worker, run_worker
+from app.worker.runner import create_and_run_worker, create_worker, run_worker
+from app.logging import configure_logging
 
-# Define a type for our Click context object
 class ClickContext(TypedDict):
     config: AppConfig
     logger: structlog.BoundLogger
 
 # Shared state for signal handling
 shutdown_event = asyncio.Event()
-
-# Set up logging
-def configure_logging(config: AppConfig) -> structlog.BoundLogger:
-    """Configure logging based on application configuration."""
-    # Set up structlog
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer() if config.logging.json_format else structlog.dev.ConsoleRenderer()
-        ],
-        logger_factory=structlog.stdlib.LoggerFactory(),
-    )
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(config.logging.level.value)
-    
-    return structlog.get_logger()
 
 def handle_sigterm(signum: int, frame: Any) -> None:
     """Handle SIGTERM signal by setting shutdown event."""
@@ -99,21 +79,42 @@ def api(ctx: click.Context, host: Optional[str], port: Optional[int]) -> None:
 @cli.command()
 @click.option('--worker-id', help='Unique ID for this worker')
 @click.pass_context
-async def worker(ctx: click.Context, worker_id: Optional[str]) -> None:
+def worker(ctx: click.Context, worker_id: Optional[str]):
     """Run the worker process only."""
-    obj: Dict[str, Any] = ctx.obj
-    config: AppConfig = obj['config']
-    logger: structlog.BoundLogger = obj['logger']
+    # Get config and logger from context
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
     
-    # Create the worker
-    processor, _ = create_worker(config, logger, worker_id)
+    # Create event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     
-    # Run the worker until shutdown
+    # Create shutdown event
+    shutdown_event = asyncio.Event()
+    
+    # Set up signal handlers
+    def signal_handler():
+        logger.info("Received shutdown signal")
+        shutdown_event.set()
+    
+    # Register signals
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, signal_handler)
+    
     try:
-        await run_worker(processor, logger, shutdown_event)
+        # Import here to avoid circular imports
+        from app.worker.runner import create_and_run_worker
+        
+        # Run worker until shutdown
+        loop.run_until_complete(
+            create_and_run_worker(config, logger, worker_id, shutdown_event)
+        )
     except Exception as e:
-        logger.exception("worker_run_error", error=str(e))
+        logger.exception("worker_error", error=str(e))
         sys.exit(1)
+    finally:
+        loop.close()
+
 
 
 @cli.command()
@@ -121,93 +122,64 @@ async def worker(ctx: click.Context, worker_id: Optional[str]) -> None:
 @click.option('--port', type=int, help='Override API port from config')
 @click.option('--worker-id', help='Unique ID for worker component')
 @click.pass_context
-async def combined(ctx: click.Context, host: Optional[str], port: Optional[int], worker_id: Optional[str]) -> None:
+def combined(ctx: click.Context, host: Optional[str], port: Optional[int], worker_id: Optional[str]):
     """Run both API server and worker in the same process."""
-    obj: Dict[str, Any] = ctx.obj
-    config: AppConfig = obj['config']
-    logger: structlog.BoundLogger = obj['logger']
+    # Get config and logger from context
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
     
-    logger.info("starting_combined_mode", 
-                host=host or config.server.host, 
-                port=port or config.server.port,
-                worker_id=worker_id)
-    
-    # Create worker
-    processor, _ = create_worker(config, logger, worker_id)
-    
-    # Create API server (but don't start it yet)
-    server = await create_server(config, logger, host, port)
-    
-    # Start processor
-    processor_task = asyncio.create_task(processor.start())
-    
-    # Handle shutdown
-    async def shutdown():
-        logger.info("shutting_down_combined_mode")
-        # Stop processor
-        await processor.stop()
-        # Stop server
-        server.should_exit = True
-        
-    # Register shutdown handler
-    asyncio.get_event_loop().add_signal_handler(
-        signal.SIGINT,
-        lambda: asyncio.create_task(shutdown())
-    )
-    asyncio.get_event_loop().add_signal_handler(
-        signal.SIGTERM,
-        lambda: asyncio.create_task(shutdown())
-    )
-    
-    try:
-        # Start server (this blocks until server stops)
-        await server.serve()
-    except Exception as e:
-        logger.exception("server_error", error=str(e))
-    finally:
-        # Ensure processor is stopped if server crashes
-        if not processor_task.done():
-            await processor.stop()
-            await processor_task
-        
-        logger.info("combined_mode_shutdown_complete")
-
-
-# Run async commands with asyncio
-@cli.command()
-@click.argument('subcommand', required=True)
-@click.argument('args', nargs=-1)
-@click.pass_context
-def run_async(ctx: click.Context, subcommand: str, args: tuple) -> None:
-    """Run an async subcommand with the event loop."""
-    # Create new event loop
+    # Create event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
-    # Get the async command to run
-    if subcommand == 'worker':
-        cmd = worker
-    elif subcommand == 'combined':
-        cmd = combined
-    else:
-        click.echo(f"Unknown async command: {subcommand}")
-        sys.exit(1)
+    # Create shutdown event
+    shutdown_event = asyncio.Event()
     
     try:
-        # Run the async command
-        loop.run_until_complete(cmd(ctx, *args))
+        # Import dependencies here to avoid circular imports
+        from app.worker.runner import create_and_run_worker
+        from app.api.runner import create_server
+        
+        # Create and start tasks
+        async def start_combined():
+            # Create API server
+            server = await create_server(config, logger, host, port)
+            
+            # Start worker in background
+            worker_task = asyncio.create_task(
+                create_and_run_worker(config, logger, worker_id, shutdown_event)
+            )
+            
+            # Set up graceful shutdown
+            def signal_handler():
+                logger.info("Received shutdown signal")
+                shutdown_event.set()
+                server.should_exit = True
+            
+            # Register signals in the running loop
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, signal_handler)
+            
+            try:
+                # Run server (blocks until exit)
+                await server.serve()
+            finally:
+                # Ensure worker task is stopped
+                if not worker_task.done():
+                    await asyncio.wait_for(worker_task, timeout=10.0)
+                logger.info("combined_mode_shutdown_complete")
+        
+        # Run the combined mode
+        loop.run_until_complete(start_combined())
+            
+    except Exception as e:
+        logger.exception("combined_mode_error", error=str(e))
+        sys.exit(1)
     finally:
         loop.close()
 
-
-# Main entry point that wraps async commands
-def main() -> None:
+def main():
     """Main entry point for the CLI."""
-    if len(sys.argv) > 1 and sys.argv[1] in ['worker', 'combined']:
-        # For async commands, use run_async wrapper
-        sys.argv[0] = sys.argv[0] + " run_async"
-        sys.argv.insert(1, "run_async")
-    
     cli()
 
 

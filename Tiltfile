@@ -9,6 +9,7 @@ docker_build('whisperserve-dev/temporal-dev',
 
 k8s_yaml('_dev-env/k8s/postgres/postgres.yaml')
 k8s_yaml('_dev-env/k8s/temporal/temporal.yaml')
+k8s_yaml('_dev-env/k8s/minio/minio.yaml')
 
 postgres_port = port_prefix + "10"
 k8s_resource(
@@ -17,6 +18,7 @@ k8s_resource(
     labels=["98-svc"]
 )
 k8s_resource('whisperserve-dev-temporal', port_forwards=[port_prefix + '30:7233', port_prefix + '31:8233'], labels=["98-svc"])
+k8s_resource('whisperserve-dev-minio', port_forwards=[port_prefix + '40:9000', port_prefix + '41:9001'], labels=["98-svc"])
 
 
 
@@ -38,6 +40,12 @@ local_resource("wait-for-dependencies",
         "wait-for-postgres",
         "wait-for-temporal",
     ],
+    labels=["99-meta"])
+
+local_resource("wait-and-ensure-minio",
+    allow_parallel=True,
+    cmd="bash ./_dev-env/ensure-minio.bash",
+    resource_deps=["whisperserve-dev-minio"],
     labels=["99-meta"])
 
 if run_mode == "dev-in-tilt":

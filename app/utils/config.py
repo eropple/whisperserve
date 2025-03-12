@@ -51,13 +51,37 @@ class OpenTelemetryConfig(BaseModel):
     endpoint: Optional[str] = Field(default=None, description="OpenTelemetry collector endpoint")
     service_name: str = Field(default="whisperserve", description="Service name for OpenTelemetry")
 
+
+class S3BucketsConfig(BaseModel):
+    """Configuration for S3 buckets used by the application."""
+    work_area: str = Field(..., description="Bucket for temporary work files during transcription")
+
+
+class S3Config(BaseModel):
+    """Configuration for S3 compatible storage."""
+    endpoint: str = Field(..., description="S3 endpoint without http/https prefix")
+    port: int = Field(default=443, description="S3 endpoint port")
+    ssl: bool = Field(default=True, description="Whether to use SSL for S3 connections")
+    access_key: str = Field(..., description="S3 access key")
+    secret_key: str = Field(..., description="S3 secret key")
+    buckets: S3BucketsConfig = Field(..., description="S3 bucket configuration")
+    
+    @property
+    def endpoint_url(self) -> str:
+        """Get the full endpoint URL with protocol."""
+        protocol = "https" if self.ssl else "http"
+        return f"{protocol}://{self.endpoint}"
+
+
 class TemporalConfig(BaseModel):
     """Configuration for Temporal workflow engine."""
-    server_address: str = Field(default="whisperserve-dev-temporal:7233", description="Address of the Temporal server")
+    server_address: str = Field(..., description="Address of the Temporal server")
     namespace: str = Field(default="default", description="Temporal namespace")
     enable_tls: bool = Field(default=False, description="Whether to use TLS for Temporal connection")
-    task_queue: str = Field(default="transcription-queue", description="Default task queue for workflows")
+    task_queue: str = Field(..., description="Default task queue for workflows")
     workflow_id_prefix: str = Field(default="transcription-", description="Prefix for workflow IDs")
+    max_concurrent_activities: int = Field(default=10, description="Maximum number of concurrent activities")
+
 
 class ServerConfig(BaseModel):
     host: str = Field(default="0.0.0.0", description="Server host")
@@ -69,13 +93,33 @@ class ServerConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    server: ServerConfig = Field(default_factory=ServerConfig)
+    server: ServerConfig
     database: DatabaseConfig
-    model: ModelConfig = Field(default_factory=ModelConfig)
+    model: ModelConfig
     jwt: JWTConfig
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    telemetry: OpenTelemetryConfig = Field(default_factory=OpenTelemetryConfig)
-    temporal: TemporalConfig = Field(default_factory=TemporalConfig)
+    logging: LoggingConfig
+    telemetry: OpenTelemetryConfig
+    temporal: TemporalConfig
+    s3: S3Config
+
+
+def load_s3_config() -> S3Config:
+    """
+    Load S3 configuration from environment variables.
+    """
+    # Create S3BucketsConfig first
+    buckets_config = S3BucketsConfig(
+        work_area=get_env_str("S3__BUCKETS__WORK_AREA")
+    )
+    
+    return S3Config(
+        endpoint=get_env_str("S3__ENDPOINT"),
+        port=get_env_int("S3__PORT", 443),
+        ssl=get_env_bool("S3__SSL", True),
+        access_key=get_env_str("S3__ACCESS_KEY"),
+        secret_key=get_env_str("S3__SECRET_KEY"),
+        buckets=buckets_config
+    )
 
 
 def load_server_config() -> ServerConfig:
@@ -91,6 +135,7 @@ def load_server_config() -> ServerConfig:
         max_retries=get_env_int("SERVER__MAX_RETRIES", 3)
     )
 
+
 def load_temporal_config() -> TemporalConfig:
     """
     Load Temporal configuration from environment variables.
@@ -98,10 +143,12 @@ def load_temporal_config() -> TemporalConfig:
     return TemporalConfig(
         server_address=get_env_str("TEMPORAL__SERVER_ADDRESS"),
         namespace=get_env_str("TEMPORAL__NAMESPACE", "default"),
-        enable_tls=get_env_bool("TEMPORAL__ENABLE_TLS"),
+        enable_tls=get_env_bool("TEMPORAL__ENABLE_TLS", False),
         task_queue=get_env_str("TEMPORAL__TASK_QUEUE"),
-        workflow_id_prefix=get_env_str("TEMPORAL__WORKFLOW_ID_PREFIX", "transcription-")
+        workflow_id_prefix=get_env_str("TEMPORAL__WORKFLOW_ID_PREFIX", "transcription-"),
+        max_concurrent_activities=get_env_int("TEMPORAL__MAX_CONCURRENT_ACTIVITIES", 10)
     )
+
 
 def load_database_config() -> DatabaseConfig:
     """
@@ -175,7 +222,8 @@ def load_config() -> AppConfig:
             jwt=load_jwt_config(),
             logging=load_logging_config(),
             telemetry=load_telemetry_config(),
-            temporal=load_temporal_config()
+            temporal=load_temporal_config(),
+            s3=load_s3_config()
         )
         return config
     except ValueError as e:

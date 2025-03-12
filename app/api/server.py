@@ -4,13 +4,12 @@ from typing import Dict, Any
 
 from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import structlog
 
+from app.logging import get_logger
 from app.utils.config import AppConfig
 
 # Configure logger
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 def create_app(config: AppConfig) -> FastAPI:
     """Create and configure the FastAPI application."""

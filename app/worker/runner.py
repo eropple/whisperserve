@@ -1,81 +1,132 @@
-"""Worker runner for WhisperServe."""
+"""Worker runner for WhisperServe with Temporal integration."""
 import asyncio
 import uuid
-from typing import Optional, Tuple
+from typing import Optional
 
 import structlog
+from temporalio.client import Client as TemporalClient
+from temporalio.worker import Worker as TemporalWorker
+from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio import workflow
 
-from app.utils.config import AppConfig, HardwareAcceleration
+from app.utils.config import AppConfig
 from app.db.engine import init_db
-from app.worker.backends.base import ModelBackend
-from app.worker.backends.mock import MockBackend
-from app.worker.backends.whisperx_cpu_backend import WhisperXCPUBackend
-from app.worker.processor import JobProcessor
+from app.worker.activities.registry import get_activities
+from app.worker.workflows import TranscriptionWorkflow
+from app.logging import get_logger
 
-def create_backend(config: AppConfig, logger: structlog.BoundLogger) -> ModelBackend:
-    """Create and initialize the appropriate model backend based on configuration."""
-    # Create appropriate backend based on configuration
-    if config.model.acceleration == HardwareAcceleration.MOCK:
-        logger.info("using_mock_backend")
-        backend = MockBackend(model_size=config.model.model_size)
-    elif config.model.acceleration == HardwareAcceleration.CPU:
-        logger.info("using_whisperx_cpu_backend", model_size=config.model.model_size)
-        backend = WhisperXCPUBackend(config.model)
-    else:
-        # TODO: Implement other backends
-        logger.error("unsupported_acceleration", acceleration=config.model.acceleration)
-        raise ValueError(f"Unsupported acceleration: {config.model.acceleration}")
+with workflow.unsafe.imports_passed_through():
+    import pydantic
+    import app.worker.models
+
+async def create_temporal_client(config: AppConfig) -> TemporalClient:
+    """Create and connect to the Temporal server."""
+    logger = get_logger(__name__)
+    logger.info("connecting_to_temporal", 
+                namespace=config.temporal.namespace, 
+                server=config.temporal.server_address)
     
-    return backend
+    # Connect to Temporal server with Pydantic data converter
+    client = await TemporalClient.connect(
+        config.temporal.server_address,
+        namespace=config.temporal.namespace,
+        data_converter=pydantic_data_converter
+    )
+    
+    logger.info("temporal_client_connected")
+    return client
 
-def create_worker(
+async def create_worker(
     config: AppConfig, 
     logger: structlog.BoundLogger,
+    client: TemporalClient,
     worker_id: Optional[str] = None
-) -> Tuple[JobProcessor, ModelBackend]:
-    """Create and initialize a worker processor."""
-    # Initialize database
-    init_db(config.database)
-    
+) -> TemporalWorker:
+    """Create a Temporal worker."""
     # Generate worker ID if not provided
     if not worker_id:
         worker_id = f"worker-{uuid.uuid4()}"
     
-    logger.info("creating_worker", worker_id=worker_id)
+    logger = logger.bind(worker_id=worker_id)
+    logger.info("creating_temporal_worker")
     
-    # Create backend
-    backend = create_backend(config, logger)
+    # Initialize database
+    init_db(config.database)
     
-    # Create job processor
-    processor = JobProcessor(
-        model_backend=backend,
-        server_config=config.server,
-        worker_id=worker_id
+    # Get activities from registry
+    activities = get_activities()
+    
+    # Create worker
+    worker = TemporalWorker(
+        client=client,
+        task_queue=config.temporal.task_queue,
+        activities=activities,
+        workflows=[TranscriptionWorkflow],
+        identity=worker_id
     )
     
-    return processor, backend
+    logger.info("temporal_worker_created", task_queue=config.temporal.task_queue)
+    return worker
 
 async def run_worker(
-    processor: JobProcessor,
+    worker: TemporalWorker,
     logger: structlog.BoundLogger,
     shutdown_event: asyncio.Event
 ) -> None:
-    """Run a worker processor until shutdown is requested."""
+    """Run a Temporal worker until shutdown is requested."""
     try:
-        # Create task for the processor
-        processor_task = asyncio.create_task(processor.start())
+        worker_task = asyncio.create_task(worker.run())
         
-        # Wait for shutdown signal
+        logger.info("temporal_worker_started")
+        
         await shutdown_event.wait()
         
-        # Stop processor gracefully
         logger.info("shutting_down_worker")
-        await processor.stop()
         
-        # Wait for processor to complete shutdown
-        await processor_task
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
         
         logger.info("worker_shutdown_complete")
     except Exception as e:
         logger.exception("worker_error", error=str(e))
+
+async def create_and_run_worker(
+    config: AppConfig,
+    logger: structlog.BoundLogger,
+    worker_id: Optional[str] = None,
+    shutdown_event: Optional[asyncio.Event] = None
+) -> None:
+    """
+    Create and run a worker with a single function call.
+    This is the main entry point for CLI to use.
+    
+    Args:
+        config: Application configuration
+        logger: Structured logger
+        worker_id: Optional ID for the worker
+        shutdown_event: Event to signal worker shutdown
+    """
+    # Create shutdown event if not provided
+    if shutdown_event is None:
+        shutdown_event = asyncio.Event()
+    
+    logger.info("starting_worker", worker_id=worker_id or "auto-generated")
+    
+    try:
+        # Create Temporal client
+        client = await create_temporal_client(config)
+        
+        # Create worker
+        worker = await create_worker(
+            config, logger, client, worker_id
+        )
+        
+        # Run worker until shutdown
+        await run_worker(worker, logger, shutdown_event)
+        
+    except Exception as e:
+        logger.exception("worker_startup_failed", error=str(e))
         raise
