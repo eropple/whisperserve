@@ -6,6 +6,7 @@ from typing import Optional
 import structlog
 from temporalio.client import Client as TemporalClient
 from temporalio.worker import Worker as TemporalWorker
+from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
 from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio import workflow
 
@@ -62,7 +63,15 @@ async def create_worker(
         task_queue=config.temporal.task_queue,
         activities=activities,
         workflows=[TranscriptionWorkflow],
-        identity=worker_id
+        identity=worker_id,
+        # TODO: this is bad, figure out how to make sandboxing work
+        #       I think this is somewhere in whisperx but I'm not sure about that
+        #       and Temporal's error messages are not helpful. I am reasonably
+        #       confident (and in saying this I am cursing myself) that we are not
+        #       using any nondeterministic functions in our workflow.
+        workflow_runner=SandboxedWorkflowRunner(
+            restrictions=SandboxRestrictions.default.with_passthrough_all_modules()
+        )
     )
     
     logger.info("temporal_worker_created", task_queue=config.temporal.task_queue)
