@@ -32,24 +32,24 @@ def configure_logging(config: AppConfig) -> structlog.BoundLogger:
     else:
         formatter = structlog.dev.ConsoleRenderer(colors=True)
     
-    # Processors for structlog
-    structlog_processors = [
-        # These run on structured data
+    # Common processors for both structlog and stdlib
+    shared_processors = [
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),  # Add timestamp to all logs
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+    ]
+    
+    # Processors for structlog
+    structlog_processors = shared_processors + [
+        # Wraps for stdlib formatter integration
         structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
     
     # Processors for stdlib logging records
-    stdlib_processors = [
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.contextvars.merge_contextvars,
+    stdlib_processors = shared_processors + [
+        structlog.stdlib.add_logger_name,  # Add logger name only for stdlib logs
     ]
     
     # Set up standard logging
