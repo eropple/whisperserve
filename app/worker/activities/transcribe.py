@@ -22,12 +22,10 @@ async def transcribe_media(input_data: TranscribeMediaInput) -> TranscribeMediaO
     Returns:
         Transcription results
     """
-    # Load config inside the activity
     config = load_config()
     
-    # Import boto3 inside activity
-    import boto3
-    s3_client = boto3.client('s3')
+    from app.utils.s3 import create_s3_client
+    s3_client = create_s3_client(config.s3, telemetry_config=config.telemetry)
     
     logger = get_logger().bind(
         activity="transcribe_media", 

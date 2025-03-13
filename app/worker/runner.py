@@ -35,7 +35,7 @@ async def create_worker(
     logger.info("creating_temporal_worker")
     
     # Initialize database
-    init_db(config.database)
+    init_db(config.database, config.telemetry)
     
     # Get activities from registry
     activities = get_activities()

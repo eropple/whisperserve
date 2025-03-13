@@ -1,8 +1,7 @@
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine, async_sessionmaker
-from sqlalchemy.orm import sessionmaker
 
 from app.utils.config import DatabaseConfig, OpenTelemetryConfig
 from app.logging import get_logger
@@ -13,7 +12,7 @@ logger = get_logger(__name__)
 # Global engine instance
 _engine: AsyncEngine | None = None
 
-def init_db(config: DatabaseConfig, telemetry_config: Optional[OpenTelemetryConfig] = None) -> AsyncEngine:
+def init_db(config: DatabaseConfig, telemetry_config: OpenTelemetryConfig) -> AsyncEngine:
     """
     Initialize database engine with the provided configuration.
     

@@ -24,23 +24,19 @@ async def download_media(input_data: DownloadMediaInput) -> DownloadMediaOutput:
     Returns:
         Download result with S3 location
     """
-    # Load config inside the activity
     config = load_config()
     
-    # Initialize logger
     logger = get_logger().bind(
         activity="download_media", 
         job_id=input_data.job_id,
         tenant_id=input_data.tenant_id
     )
     
-    # Get workflow ID from activity info
     workflow_id = activity.info().workflow_id
     logger.info("media_download_started", 
                 url=input_data.media_url, 
                 workflow_id=workflow_id)
     
-    # Create a temporary local directory for processing
     temp_dir = Path(f"/tmp/whisperserve/{input_data.job_id}")
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -106,7 +102,7 @@ async def download_media(input_data: DownloadMediaInput) -> DownloadMediaOutput:
         # Prepare extra arguments including content type
         extra_args = {}
         if content_type:
-            extra_args['ContentType'] = content_type
+            extra_args['Content-Type'] = content_type
         
         # Add metadata to track the source
         extra_args['Metadata'] = {
@@ -116,9 +112,8 @@ async def download_media(input_data: DownloadMediaInput) -> DownloadMediaOutput:
             'sha256': calculated_hash
         }
         
-        # Import boto3 inside activity
-        import boto3
-        s3_client = boto3.client('s3')
+        from app.utils.s3 import create_s3_client
+        s3_client = create_s3_client(config.s3, telemetry_config=config.telemetry)
         
         # Upload to S3
         s3_client.upload_file(

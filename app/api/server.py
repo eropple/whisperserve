@@ -36,6 +36,7 @@ def create_app(config: AppConfig) -> FastAPI:
     # Add request middleware to log requests and add correlation IDs
     @app.middleware("http")
     async def request_middleware(request: Request, call_next):
+        # TODO: attach OTEL to request logging
         # Generate unique request ID for correlation
         request_id = request.headers.get("X-Request-ID", str(uuid4()))
         
