@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-echo "📦 Stopping WhisperServe development environment..."
+echo "📦 Stopping WhisperServe integration test environment..."
 
 # Check if dotenvx is installed
 if ! command -v dotenvx &> /dev/null; then
@@ -19,7 +19,7 @@ if ! command -v tilt &> /dev/null; then
 fi
 
 # Load environment variables and stop tilt
-echo "🛑 Loading environment variables and stopping Tilt..."
-dotenvx run --env-file=.env.local -- tilt down
+echo "🛑 Loading integration environment variables and stopping Tilt..."
+dotenvx run --env-file=.env.integration.local -- tilt down
 
-echo "✨ Tilt stopped successfully!"
+echo "✨ Integration environment stopped successfully!"

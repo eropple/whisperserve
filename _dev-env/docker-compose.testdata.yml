@@ -1,0 +1,11 @@
+services:
+  whisperserve-dev-testdata:
+    image: nginx:alpine
+    volumes:
+      - ../test-data:/usr/share/nginx/html:ro
+      - ./nginx-testdata.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${TEST__TESTDATA_PORT:-8090}:80"
+    environment:
+      - NGINX_HOST=localhost
+    command: nginx -g 'daemon off;'

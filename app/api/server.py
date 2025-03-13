@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer
 import structlog
 from uuid import uuid4
 
@@ -23,6 +24,9 @@ def create_app(config: AppConfig) -> FastAPI:
         description="Multi-tenant Whisper API service for speech-to-text transcription",
         version="0.1.0",
     )
+    
+    # Define security scheme
+    security_scheme = HTTPBearer(auto_error=False)
     
     # Add CORS middleware
     app.add_middleware(
@@ -96,8 +100,8 @@ def create_app(config: AppConfig) -> FastAPI:
             # Clear context vars for next request
             clear_logger_context()
     
-    # Health check endpoint
-    @app.get("/health", tags=["Health"])
+    # Health check endpoint - explicitly mark as not requiring auth
+    @app.get("/health", tags=["Health"], include_in_schema=True)
     async def health_check() -> Dict[str, Any]:
         """Health check endpoint to verify the API is running."""
         return {
@@ -107,7 +111,7 @@ def create_app(config: AppConfig) -> FastAPI:
         }
     
     from app.api.routes.jobs import router as jobs_router
-    app.include_router(jobs_router)
+    app.include_router(jobs_router, dependencies=[])
 
     # Setup OpenTelemetry if enabled
     setup_opentelemetry(app, config)

@@ -2,7 +2,8 @@
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security
+from fastapi.security import HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,9 @@ logger = get_logger(__name__)
 # Create router
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
+# Security scheme for OpenAPI documentation
+security = HTTPBearer(auto_error=False)
+
 # Create a tenant_id dependency to reuse
 async def get_tenant_id(
     request: Request,
@@ -38,24 +42,18 @@ async def get_tenant_id(
         raise HTTPException(status_code=401, detail="Valid authentication required")
     return tenant_id
 
-@router.post("", response_model=JobResponse, status_code=201)
+@router.post("", operation_id="createJob", response_model=JobResponse, status_code=201)
 async def create_job(
     request: Request,
     job_request: CreateJobRequest,
     db: AsyncSession = Depends(get_db),
-    config: AppConfig = Depends(get_config)
+    config: AppConfig = Depends(get_config),
+    token: Any = Security(security)
 ) -> Dict[str, Any]:
     """
     Create a new transcription job.
     
-    Args:
-        request: The HTTP request
-        job_request: Job creation parameters
-        db: Database session
-        config: Application config
-        
-    Returns:
-        Newly created job details
+    Requires JWT bearer authentication with a valid tenant_id claim.
     """
     # Get tenant ID from JWT
     tenant_id = await get_tenant_id(request, config)
@@ -129,24 +127,18 @@ async def create_job(
     # Return job details using explicit dictionary conversion
     return JobResponse(**job_data).dict()
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", operation_id="getJob", response_model=JobResponse)
 async def get_job(
     job_id: UUID,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    config: AppConfig = Depends(get_config)
+    config: AppConfig = Depends(get_config),
+    token: Any = Security(security)
 ) -> Dict[str, Any]:
     """
     Get job details by ID.
     
-    Args:
-        job_id: Job UUID
-        request: HTTP request
-        db: Database session
-        config: Application config
-        
-    Returns:
-        Job details including status and results if available
+    Requires JWT bearer authentication with a valid tenant_id claim.
     """
     # Get tenant ID from JWT
     tenant_id = await get_tenant_id(request, config)
@@ -192,28 +184,20 @@ async def get_job(
     # Return job details using explicit dictionary conversion
     return JobResponse(**job_data).dict()
 
-@router.get("", response_model=JobListResponse)
+@router.get("", operation_id="listJobs", response_model=JobListResponse)
 async def list_jobs(
     request: Request,
     state: Optional[JobState] = None,
     limit: int = Query(50, gt=0, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    config: AppConfig = Depends(get_config)
+    config: AppConfig = Depends(get_config),
+    token: Any = Security(security)
 ) -> Dict[str, Any]:
     """
     List jobs for the authenticated tenant.
     
-    Args:
-        request: HTTP request
-        state: Optional filter by job state
-        limit: Pagination limit
-        offset: Pagination offset
-        db: Database session
-        config: Application config
-        
-    Returns:
-        List of jobs belonging to the tenant
+    Requires JWT bearer authentication with a valid tenant_id claim.
     """
     # Get tenant ID from JWT
     tenant_id = await get_tenant_id(request, config)

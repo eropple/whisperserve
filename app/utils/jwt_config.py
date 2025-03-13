@@ -12,7 +12,7 @@ class JWTConfig(BaseModel):
     public_keys: Dict[str, Any] = Field(..., description="Parsed public keys from JWKS")
     algorithm: str = Field(default="ES256", description="Algorithm for JWT verification (default: ECDSA)")
     tenant_claim: str = Field(default="tenant_id", description="JWT claim field containing tenant ID")
-    audience_regex: Optional[Pattern] = Field(default=None, description="Regex pattern for validating token audience")
+    audience_regex: Pattern = Field(description="Regex pattern for validating audience claim")
 
 
 def load_jwt_config() -> JWTConfig:
@@ -66,8 +66,8 @@ def load_jwt_config() -> JWTConfig:
     algorithm = get_env_str("JWT__ALGORITHM", "ES256")
     
     # Get audience regex pattern if provided
-    audience_regex_str = get_env_value("JWT__AUDIENCE_REGEX")
-    audience_regex = re.compile(audience_regex_str) if audience_regex_str else None
+    audience_regex_str = get_env_str("JWT__AUDIENCE_REGEX")
+    audience_regex = re.compile(audience_regex_str)
     
     return JWTConfig(
         public_keys=public_keys,

@@ -49,6 +49,9 @@ class Job(Base):
     processing_mode = Column(SQLEnum(ProcessingMode), nullable=False, default=ProcessingMode.DOWNMIX)
 
     track_index = Column(Integer, nullable=True)
+
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.now)
@@ -76,6 +79,8 @@ class Job(Base):
             "media_sha256": self.media_sha256,  # Added SHA256 field
             "processing_mode": self.processing_mode,
             "track_index": self.track_index,
+            "attempt_count": self.attempt_count,
+            "max_attempts": self.max_attempts,
             "created_at": self.created_at.isoformat() if self.created_at is not None else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at is not None else None,
             "worker_id": self.worker_id,
@@ -120,8 +125,6 @@ class Job(Base):
         if current_attempts + 1 >= max_attempts:
             self.state = JobState.FAILED
         else:
-            # Calculate next retry time
-            self.next_attempt_at = self.calculate_next_attempt_time()
             self.state = JobState.RETRYING
     
     def mark_as_processing(self, worker_id: str) -> None:

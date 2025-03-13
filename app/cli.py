@@ -179,6 +179,52 @@ def combined(ctx: click.Context, host: Optional[str], port: Optional[int], worke
         loop.close()
 
 @cli.command()
+@click.option("--output", "-o", type=click.Path(), help="Output file path (defaults to stdout)")
+@click.option("--format", "-f", type=click.Choice(["json", "yaml"]), default="json", 
+                help="Output format (json or yaml)")
+@click.pass_context
+def openapi(ctx: click.Context, output: Optional[str], format: str):
+    """Generate OpenAPI schema without starting the server."""
+    from fastapi.openapi.utils import get_openapi
+    
+    # Get config from context
+    config = ctx.obj['config']
+    logger = ctx.obj['logger']
+    
+    logger.info("generating_openapi_schema", format=format)
+    
+    # Create the FastAPI application without starting it
+    from app.api.server import create_app
+    app = create_app(config)
+    
+    # Generate the OpenAPI schema
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # Format the output
+    if format == "json":
+        import json
+        content = json.dumps(openapi_schema, indent=2)
+    else:
+        import yaml
+        content = yaml.dump(openapi_schema)
+    
+    # Write to file or stdout
+    if output:
+        with open(output, "w") as f:
+            f.write(content)
+        logger.info("openapi_schema_written", output_file=output)
+    else:
+        print(content)
+    
+    return 0
+
+
+@cli.command()
 @click.argument('audio_file', type=click.Path(exists=True))
 @click.option('--language', help='Override language detection')
 @click.option('--model-size', help='Override model size from config')

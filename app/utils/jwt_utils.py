@@ -48,25 +48,25 @@ def decode_jwt_token(
         decoded = jwt.decode(
             token,
             key,
-            algorithms=[jwt_config.algorithm]
+            algorithms=[jwt_config.algorithm],
+            options={"verify_aud": False}
         )
-        
-        # Validate audience if regex pattern is provided
-        if jwt_config.audience_regex:
-            audience = decoded['aud']
-            if not audience:
-                if raise_exceptions:
-                    raise ValueError("Invalid token: missing audience claim")
-                return None, "Missing audience claim"
 
-            # Handle both string and list audiences
-            audiences = [audience] if isinstance(audience, str) else audience
-            
-            # Check if any audience matches the pattern
-            if not any(jwt_config.audience_regex.match(aud) for aud in audiences):
-                if raise_exceptions:
-                    raise ValueError(f"Invalid token audience: {audience}")
-                return None, f"Invalid token audience: {audience}"
+        # Validate audience if regex pattern is provided
+        audience = decoded['aud']
+        if not audience:
+            if raise_exceptions:
+                raise ValueError("Invalid token: missing audience claim")
+            return None, "Missing audience claim"
+
+        # Handle both string and list audiences
+        audiences = [audience] if isinstance(audience, str) else audience
+
+        # Check if any audience matches the pattern
+        if not any(jwt_config.audience_regex.match(aud) for aud in audiences):
+            if raise_exceptions:
+                raise ValueError(f"Invalid token audience: {audience}")
+            return None, f"Invalid token audience: {audience}"
         
         return decoded, None
         

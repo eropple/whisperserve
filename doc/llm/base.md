@@ -378,7 +378,7 @@ When running scripts, ensure you're using Poetry to access project dependencies:
 poetry run python scripts/check-config.py
 
 # Alternative: Using dotenvx with Poetry
-dotenvx load --env-file=.env.development -- poetry run python scripts/check-config.py
+dotenvx load --env-file=.env.local -- poetry run python scripts/check-config.py
 ```
 
 Poetry manages project dependencies in its own virtual environment. Scripts run outside this environment can't access packages like pydantic, FastAPI, etc.
@@ -405,7 +405,7 @@ We use dotenvx for environment variable management:
 
 ```bash
 # Load variables for a single command
-dotenvx run -- your-command
+dotenvx run --env-file=.env.local -- your-command
 ```
 
 Remember that `DATABASE__DSN` format maps to nested config objects in our app configuration.

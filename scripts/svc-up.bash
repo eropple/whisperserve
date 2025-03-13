@@ -20,6 +20,6 @@ fi
 
 # Load environment variables and start tilt
 echo "🚀 Loading environment variables and starting Tilt..."
-dotenvx run -- tilt up
+dotenvx run --env-file=.env.local -- tilt up
 
 echo "✨ Tilt started successfully!"

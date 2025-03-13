@@ -102,7 +102,7 @@ async def download_media(input_data: DownloadMediaInput) -> DownloadMediaOutput:
         # Prepare extra arguments including content type
         extra_args = {}
         if content_type:
-            extra_args['Content-Type'] = content_type
+            extra_args['ContentType'] = content_type
         
         # Add metadata to track the source
         extra_args['Metadata'] = {
