@@ -10,7 +10,7 @@ from uuid import uuid4
 from app.api.otel_setup import setup_opentelemetry
 from app.logging import get_logger, bind_logger_context, clear_logger_context
 from app.utils.config import AppConfig
-from app.utils.jwt_utils import extract_tenant_id
+from app.utils.jwt_utils import extract_tenant_id_from_request
 
 # Configure logger
 logger = get_logger(__name__)
@@ -36,7 +36,6 @@ def create_app(config: AppConfig) -> FastAPI:
     # Add request middleware to log requests and add correlation IDs
     @app.middleware("http")
     async def request_middleware(request: Request, call_next):
-        # TODO: attach OTEL to request logging
         # Generate unique request ID for correlation
         request_id = request.headers.get("X-Request-ID", str(uuid4()))
         
@@ -48,13 +47,11 @@ def create_app(config: AppConfig) -> FastAPI:
             "client_ip": request.client.host if request.client else None,
         }
         
-        # Try to extract tenant ID for logging
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.replace("Bearer ", "")
-            tenant_id = extract_tenant_id(token, config, raise_exceptions=False)
-            if tenant_id:
-                log_context["tenant_id"] = tenant_id
+        # Try to extract tenant ID for logging using our utility function
+        # We pass raise_exceptions=False to avoid exceptions during logging context setup
+        tenant_id = extract_tenant_id_from_request(request, config.jwt, raise_exceptions=False)
+        if tenant_id:
+            log_context["tenant_id"] = tenant_id
         
         # Bind variables to context for this request
         bind_logger_context(**log_context)
@@ -109,10 +106,9 @@ def create_app(config: AppConfig) -> FastAPI:
             "service": "whisperserve",
         }
     
-    # In a real implementation, you would include API routers here
-    # from app.api.routes import jobs_router
-    # app.include_router(jobs_router)
-    
+    from app.api.routes.jobs import router as jobs_router
+    app.include_router(jobs_router)
+
     # Setup OpenTelemetry if enabled
     setup_opentelemetry(app, config)
     

@@ -1,12 +1,13 @@
 """JWT utilities for token validation and information extraction."""
 from typing import Optional, Any, Dict, Tuple
+from fastapi import Request, HTTPException
 
 from jose import jwt, JWTError
-from app.utils.config import AppConfig
+from app.utils.jwt_config import JWTConfig
 
 def decode_jwt_token(
     token: str, 
-    config: AppConfig, 
+    jwt_config: JWTConfig, 
     raise_exceptions: bool = True
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     """
@@ -14,7 +15,7 @@ def decode_jwt_token(
     
     Args:
         token: The JWT token string (without 'Bearer ' prefix)
-        config: Application configuration
+        jwt_config: JWT configuration
         raise_exceptions:   If True, raises exceptions for invalid tokens
                             If False, returns None for invalid tokens
 
@@ -37,17 +38,17 @@ def decode_jwt_token(
             return None, "Missing key ID (kid) in token"
         
         # Check if we have the key with this ID
-        if kid not in config.jwt.public_keys:
+        if kid not in jwt_config.public_keys:
             if raise_exceptions:
                 raise ValueError(f"Invalid token: unknown key ID: {kid}")
             return None, f"Unknown key ID: {kid}"
         
         # Get the key and decode the token
-        key = config.jwt.public_keys[kid]
+        key = jwt_config.public_keys[kid]
         decoded = jwt.decode(
             token,
             key,
-            algorithms=[config.jwt.algorithm]
+            algorithms=[jwt_config.algorithm]
         )
         
         return decoded, None
@@ -63,7 +64,7 @@ def decode_jwt_token(
 
 def extract_tenant_id(
     token: str, 
-    config: AppConfig, 
+    jwt_config: JWTConfig, 
     raise_exceptions: bool = True
 ) -> Optional[str]:
     """
@@ -71,9 +72,9 @@ def extract_tenant_id(
     
     Args:
         token: The JWT token string (without 'Bearer ' prefix)
-        config: Application configuration 
-        raise_exceptions: If True, raises exceptions for invalid tokens
-                         If False, returns None for invalid tokens
+        jwt_config: JWT configuration 
+        raise_exceptions:   If True, raises exceptions for invalid tokens
+                            If False, returns None for invalid tokens
     
     Returns:
         Extracted tenant ID, or None if extraction failed and raise_exceptions=False
@@ -81,15 +82,51 @@ def extract_tenant_id(
     Raises:
         ValueError: If raise_exceptions=True and token is invalid or missing tenant ID
     """
-    decoded, error = decode_jwt_token(token, config, raise_exceptions)
+    decoded, error = decode_jwt_token(token, jwt_config, raise_exceptions)
     
     if decoded is None:
         return None
         
     # Extract tenant ID from the configured claim field
-    tenant_id = decoded.get(config.jwt.tenant_claim)
+    tenant_id = decoded.get(jwt_config.tenant_claim)
     
     if not tenant_id and raise_exceptions:
-        raise ValueError(f"Token missing required claim: {config.jwt.tenant_claim}")
+        raise ValueError(f"Token missing required claim: {jwt_config.tenant_claim}")
         
     return str(tenant_id) if tenant_id else None
+
+def extract_tenant_id_from_request(
+    request: Request,
+    jwt_config: JWTConfig,
+    raise_exceptions: bool = True
+) -> Optional[str]:
+    """
+    Extract tenant ID from the Authorization header in a request.
+    
+    Args:
+        request: FastAPI request object
+        jwt_config: JWT configuration
+        raise_exceptions: If True, raises exceptions for invalid tokens
+    
+    Returns:
+        Extracted tenant ID or None if extraction failed and raise_exceptions=False
+        
+    Raises:
+        HTTPException: If authorization header is missing or invalid
+        ValueError: If token validation fails and raise_exceptions=True
+    """
+    auth_header = request.headers.get("Authorization")
+    
+    if not auth_header or not auth_header.startswith("Bearer "):
+        if raise_exceptions:
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        return None
+        
+    token = auth_header.replace("Bearer ", "")
+    
+    try:
+        return extract_tenant_id(token, jwt_config, raise_exceptions)
+    except ValueError as e:
+        if raise_exceptions:
+            raise HTTPException(status_code=401, detail=str(e))
+        return None

@@ -3,6 +3,7 @@ from typing import Annotated, AsyncGenerator, Optional
 import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, Request, Header, HTTPException
+from structlog import BoundLogger
 from temporalio.client import Client as TemporalClient
 
 from app.utils.config import AppConfig, load_config
@@ -75,7 +76,7 @@ async def get_tenant_id(
     token = authorization.replace("Bearer ", "")
     
     try:
-        tenant_id = extract_tenant_id(token, config, raise_exceptions=True)
+        tenant_id = extract_tenant_id(token, config.jwt, raise_exceptions=True)
         if not tenant_id:
             raise HTTPException(
                 status_code=403, 
@@ -90,7 +91,7 @@ async def get_tenant_id(
         logger.exception("tenant_id_extraction_error", error=str(e))
         raise HTTPException(status_code=500, detail="Authentication error")
 
-async def get_request_logger(request: Request) -> AsyncGenerator[get_logger.BoundLogger, None]:
+async def get_request_logger(request: Request) -> AsyncGenerator[BoundLogger, None]:
     """
     Get a logger instance with request context.
     
