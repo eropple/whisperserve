@@ -17,7 +17,8 @@ k8s_resource(
     port_forwards=[port_prefix + "10:5432"],
     labels=["98-svc"]
 )
-k8s_resource('whisperserve-dev-temporal', port_forwards=[port_prefix + '30:7233', port_prefix + '31:8233'], labels=["98-svc"])
+temporal_ui_port = port_prefix + "31"
+k8s_resource('whisperserve-dev-temporal', port_forwards=[port_prefix + '30:7233', temporal_ui_port + ':8233'], labels=["98-svc"])
 k8s_resource('whisperserve-dev-minio', port_forwards=[port_prefix + '40:9000', port_prefix + '41:9001'], labels=["98-svc"])
 
 
@@ -54,7 +55,8 @@ if run_mode == "dev-in-tilt":
     local_resource(
         'api',
         serve_cmd="./scripts/run-dev.bash api",
-        links=["http://localhost:" + app_port],
+        links=[link("http://localhost:" + app_port, "API"),
+                link("http://localhost:" + app_port + "/docs", "API Docs")],
         deps=["wait-for-dependencies"],
         allow_parallel=True,
         labels=["00-app"]
@@ -63,7 +65,7 @@ if run_mode == "dev-in-tilt":
     local_resource(
         'worker',
         serve_cmd="./scripts/run-dev.bash worker",
-        links=["http://localhost:" + app_port],
+        links=[link("http://localhost:" + temporal_ui_port, "Temporal UI")],
         deps=["wait-for-dependencies"],
         allow_parallel=True,
         labels=["00-app"]

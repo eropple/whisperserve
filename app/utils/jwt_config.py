@@ -1,5 +1,6 @@
 import json
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Optional, Pattern
 
 from jose import jwk
 from pydantic import BaseModel, Field, field_validator
@@ -11,7 +12,7 @@ class JWTConfig(BaseModel):
     public_keys: Dict[str, Any] = Field(..., description="Parsed public keys from JWKS")
     algorithm: str = Field(default="ES256", description="Algorithm for JWT verification (default: ECDSA)")
     tenant_claim: str = Field(default="tenant_id", description="JWT claim field containing tenant ID")
-    expiration_minutes: int = Field(default=60, description="JWT token expiration time in minutes")
+    audience_regex: Optional[Pattern] = Field(default=None, description="Regex pattern for validating token audience")
 
 
 def load_jwt_config() -> JWTConfig:
@@ -64,9 +65,13 @@ def load_jwt_config() -> JWTConfig:
     # Default to ES256 (ECDSA with P-256 and SHA-256) 
     algorithm = get_env_str("JWT__ALGORITHM", "ES256")
     
+    # Get audience regex pattern if provided
+    audience_regex_str = get_env_value("JWT__AUDIENCE_REGEX")
+    audience_regex = re.compile(audience_regex_str) if audience_regex_str else None
+    
     return JWTConfig(
         public_keys=public_keys,
         algorithm=algorithm,
-        tenant_claim=get_env_str("JWT__TENANT_CLAIM", "tenant_id"),
-        expiration_minutes=get_env_int("JWT__EXPIRATION_MINUTES", 60)
+        tenant_claim=get_env_str("JWT__TENANT_CLAIM", "sub"),
+        audience_regex=audience_regex
     )

@@ -51,6 +51,23 @@ def decode_jwt_token(
             algorithms=[jwt_config.algorithm]
         )
         
+        # Validate audience if regex pattern is provided
+        if jwt_config.audience_regex:
+            audience = decoded['aud']
+            if not audience:
+                if raise_exceptions:
+                    raise ValueError("Invalid token: missing audience claim")
+                return None, "Missing audience claim"
+
+            # Handle both string and list audiences
+            audiences = [audience] if isinstance(audience, str) else audience
+            
+            # Check if any audience matches the pattern
+            if not any(jwt_config.audience_regex.match(aud) for aud in audiences):
+                if raise_exceptions:
+                    raise ValueError(f"Invalid token audience: {audience}")
+                return None, f"Invalid token audience: {audience}"
+        
         return decoded, None
         
     except JWTError as e:
@@ -73,7 +90,7 @@ def extract_tenant_id(
     Args:
         token: The JWT token string (without 'Bearer ' prefix)
         jwt_config: JWT configuration 
-        raise_exceptions:   If True, raises exceptions for invalid tokens
+        raise_exceptions: If True, raises exceptions for invalid tokens
                             If False, returns None for invalid tokens
     
     Returns:
