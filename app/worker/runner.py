@@ -7,7 +7,6 @@ import structlog
 from temporalio.client import Client as TemporalClient
 from temporalio.worker import Worker as TemporalWorker
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner, SandboxRestrictions
-from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio import workflow
 
 from app.utils.config import AppConfig
@@ -15,27 +14,11 @@ from app.db.engine import init_db
 from app.worker.activities.registry import get_activities
 from app.worker.workflows import TranscriptionWorkflow
 from app.logging import get_logger
+from app.temporal.client import get_temporal_client  # Updated import
 
 with workflow.unsafe.imports_passed_through():
     import pydantic
     import app.worker.models
-
-async def create_temporal_client(config: AppConfig) -> TemporalClient:
-    """Create and connect to the Temporal server."""
-    logger = get_logger(__name__)
-    logger.info("connecting_to_temporal", 
-                namespace=config.temporal.namespace, 
-                server=config.temporal.server_address)
-    
-    # Connect to Temporal server with Pydantic data converter
-    client = await TemporalClient.connect(
-        config.temporal.server_address,
-        namespace=config.temporal.namespace,
-        data_converter=pydantic_data_converter
-    )
-    
-    logger.info("temporal_client_connected")
-    return client
 
 async def create_worker(
     config: AppConfig, 
@@ -125,8 +108,8 @@ async def create_and_run_worker(
     logger.info("starting_worker", worker_id=worker_id or "auto-generated")
     
     try:
-        # Create Temporal client
-        client = await create_temporal_client(config)
+        # Use the shared client creation function
+        client = await get_temporal_client(config)
         
         # Create worker
         worker = await create_worker(

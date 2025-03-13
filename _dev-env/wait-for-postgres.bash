@@ -10,13 +10,13 @@ command -v psql >/dev/null 2>&1 || { echo >&2 "psql is required but it's not ins
 echo "Waiting for PostgreSQL to become available..."
 
 while [ $count -lt $MAX_TRIES ]; do
-    echo "Attempting to connect to PostgreSQL, host '$CENTRAL_POSTGRES__READWRITE__HOST' port '$CENTRAL_POSTGRES__READWRITE__PORT' user '$CENTRAL_POSTGRES__READWRITE__USER'..."
+    echo "Attempting to connect to PostgreSQL, host '$DEV_DATABASE_HOST' port '$DEV_DATABASE_PORT' user '$DEV_DATABASE_USER'..."
 
-    PGPASSWORD=$CENTRAL_POSTGRES__READWRITE__PASSWORD psql \
-        -h "$CENTRAL_POSTGRES__READWRITE__HOST" \
-        -p "$CENTRAL_POSTGRES__READWRITE__PORT" \
-        -U "$CENTRAL_POSTGRES__READWRITE__USER" \
-        -d "$CENTRAL_POSTGRES__READWRITE__DATABASE" \
+    PGPASSWORD=$DEV_DATABASE_PASSWORD psql \
+        -h "$DEV_DATABASE_HOST" \
+        -p "$DEV_DATABASE_PORT" \
+        -U "$DEV_DATABASE_USER" \
+        -d "$DEV_DATABASE_NAME" \
         -c "SELECT 1;"
 
     # shellcheck disable=SC2181

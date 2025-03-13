@@ -1,17 +1,12 @@
 {
-    "python.analysis.extraPaths": [
-        "${workspaceFolder}"
-    ],
     "python.analysis.autoImportCompletions": true,
-    "python.analysis.typeCheckingMode": "basic",
     "python.analysis.diagnosticMode": "workspace",
     "python.analysis.indexing": true,
-    "python.linting.enabled": true,
     "python.languageServer": "Pylance",
     "editor.formatOnSave": true,
-    "python.formatting.provider": "black",
-    "python.formatting.blackArgs": [
-        "--line-length",
-        "100"
-    ]
+    "github.copilot.chat.codeGeneration.instructions": [
+        {
+            "file": "./doc/llm/base.md"
+        }
+    ],
 }

@@ -50,6 +50,7 @@ class OpenTelemetryConfig(BaseModel):
     enabled: bool = Field(default=False, description="Enable OpenTelemetry integration")
     endpoint: Optional[str] = Field(default=None, description="OpenTelemetry collector endpoint")
     service_name: str = Field(default="whisperserve", description="Service name for OpenTelemetry")
+    insecure: bool = Field(default=False, description="Disable TLS for OpenTelemetry collector connection")
 
 
 class S3BucketsConfig(BaseModel):
@@ -206,7 +207,8 @@ def load_telemetry_config() -> OpenTelemetryConfig:
     return OpenTelemetryConfig(
         enabled=get_env_bool("TELEMETRY__ENABLED", False),
         endpoint=get_env_value("TELEMETRY__ENDPOINT"),
-        service_name=get_env_str("TELEMETRY__SERVICE_NAME", "whisperserve")
+        service_name=get_env_str("TELEMETRY__SERVICE_NAME", "whisperserve"),
+        insecure=get_env_bool("TELEMETRY__INSECURE", False)
     )
 
 

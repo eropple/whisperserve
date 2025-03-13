@@ -52,13 +52,21 @@ if run_mode == "dev-in-tilt":
     app_port = port_prefix + "00"
     # Run the application as a local_resource
     local_resource(
-        'whisperserve',
-        cmd="true",
-        # serve_cmd="cd whisperserve && poetry run uvicorn app.main:app --reload --host 0.0.0.0 --port " + app_port,
+        'api',
+        serve_cmd="./scripts/run-dev.bash api",
         links=["http://localhost:" + app_port],
         deps=["wait-for-dependencies"],
         allow_parallel=True,
-        labels=["app"]
+        labels=["00-app"]
+    )
+
+    local_resource(
+        'worker',
+        serve_cmd="./scripts/run-dev.bash worker",
+        links=["http://localhost:" + app_port],
+        deps=["wait-for-dependencies"],
+        allow_parallel=True,
+        labels=["00-app"]
     )
 else:
     # In other modes, we'd typically define a k8s deployment here

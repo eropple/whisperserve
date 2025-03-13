@@ -53,18 +53,9 @@ class Job(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.now)
     updated_at = Column(DateTime(timezone=True), default=datetime.now, onupdate=datetime.now)
-    started_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Worker tracking
     worker_id = Column(String, nullable=True)
-    
-    # Retry and backoff mechanism
-    attempt_count = Column(Integer, default=0)  # Current attempt number
-    max_attempts = Column(Integer, default=3)   # Maximum number of attempts allowed
-    next_attempt_at = Column(DateTime(timezone=True), nullable=True)  # When to retry
-    backoff_factor = Column(Float, default=2.0)  # Exponential backoff multiplier
-    backoff_base_seconds = Column(Integer, default=30)  # Initial backoff time in seconds
     
     # Results and errors
     error = Column(JSON, nullable=True)  # JSON blob with error details
@@ -87,33 +78,13 @@ class Job(Base):
             "track_index": self.track_index,
             "created_at": self.created_at.isoformat() if self.created_at is not None else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at is not None else None,
-            "started_at": self.started_at.isoformat() if self.started_at is not None else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at is not None else None,
             "worker_id": self.worker_id,
-            "attempt_count": self.attempt_count,
-            "max_attempts": self.max_attempts,
-            "next_attempt_at": self.next_attempt_at.isoformat() if self.next_attempt_at is not None else None,
             "error": self.error,
             "error_history": self.error_history,
             "result": self.result,
             "media_duration_seconds": self.media_duration_seconds,
             "processing_time_seconds": self.processing_time_seconds,
         }
-    
-    def calculate_next_attempt_time(self) -> datetime:
-        """
-        Calculate the next attempt time using exponential backoff.
-        Formula: base_seconds * (backoff_factor ^ attempt_count)
-        """
-        # Use cast to help the type checker understand these are actual values at runtime
-        base_seconds = cast(float, self.backoff_base_seconds)
-        factor = cast(float, self.backoff_factor)
-        attempts = cast(int, self.attempt_count)
-        
-        delay_seconds = base_seconds * (factor ** attempts)
-        # Cap at a reasonable maximum (e.g., 1 hour)
-        delay_seconds = min(delay_seconds, 3600)
-        return datetime.now() + timedelta(seconds=delay_seconds)
     
     def record_failure(self, error_info: Dict[str, Any]) -> None:
         """

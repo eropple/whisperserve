@@ -2,16 +2,23 @@
 
 I need your help designing a standalone speech-to-text transcription service that wraps Whisper models with a clean, multi-tenant API. This is an open-source project separate from other systems I'm working on, but follows similar architectural principles.
 
+## Interaction Model with LLM
+
+Above all else, **do not race ahead**. By default, the Claude model likes to do a ton of different things and leave me without the ability to build mental context as we go. **You must not do this.** If you're asked a question, return semantically related information AND THEN STOP, unless you're asked to do the entire thing in one pass.
+
 ## Architecture
 
 ### Process Model
+
 - Single-process design combining API and worker in one application
 - FastAPI for HTTP endpoints
 - Background task loop for job processing
 - Shared model loading for efficient resource usage
-- PostgreSQL with SKIP LOCKED pattern for job queue
+- PostgreSQL data store for client-facing state
+- Temporal for the asynchronous job queue
 
 #### Example Logging Implementation
+
 ```python
 import structlog
 import logging
@@ -42,11 +49,11 @@ async def add_request_context(request: Request, call_next):
     # Generate unique request ID
     request_id = str(uuid4())
     request_id_var.set(request_id)
-    
+
     # Extract tenant from JWT (placeholder implementation)
     tenant_id = get_tenant_from_jwt(request)
     tenant_id_var.set(tenant_id)
-    
+
     # Bind context vars that will be included in all log entries
     structlog.contextvars.bind_contextvars(
         request_id=request_id,
@@ -54,11 +61,11 @@ async def add_request_context(request: Request, call_next):
         path=request.url.path,
         method=request.method
     )
-    
+
     # Add request ID to response headers for correlation
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
-    
+
     return response
 
 # Create logger instance
@@ -68,10 +75,10 @@ logger = structlog.get_logger()
 @app.post("/jobs/")
 async def create_job(job_request: JobRequest):
     logger.info("Creating new transcription job", media_url=job_request.media_url)
-    
+
     # Process request...
     job_id = await create_job_in_db(job_request)
-    
+
     logger.info("Job created successfully", job_id=job_id)
     return {"job_id": job_id}
 
@@ -83,40 +90,43 @@ async def process_job(job_id: str, model):
         tenant_id=job.tenant_id,
         worker_id=worker_id
     )
-    
+
     logger.info("Starting job processing")
-    
+
     try:
         # Process job...
         logger.info("Media download started", url=job.media_url)
         # More processing...
-        
-        logger.info("Job completed successfully", 
+
+        logger.info("Job completed successfully",
                     processing_time=processing_time,
                     media_duration=media_duration)
-                    
+
     except Exception as e:
         logger.exception("Job processing failed", error=str(e))
         # Handle failure...
 ```
 
 ## Database Design
-- PostgreSQL for both API data and job queue
-- Transactional job queue using SKIP LOCKED
+
+- PostgreSQL for API data
 - Job status tracking and result storage
 - Tenant isolation at the database level
+- Temporal manages its own storage
 
 ### Process Flow
+
 1. Client submits job via API
 2. Job stored in PostgreSQL
-3. Background worker loop claims jobs
-4. Models loaded once at startup
+3. Job dispatched to Temporal
+4. Models loaded in each activity that does transcription (slower but safer)
 5. Results written back to database
 6. Client polls for completion
 
 ## Core Requirements
 
 ### Media Processing
+
 - Support for both audio and video input files
 - FFmpeg integration for extracting audio tracks from video files
 - Handling of various media formats (MP4, MKV, MP3, WAV, etc.)
@@ -126,27 +136,33 @@ async def process_job(job_id: str, model):
   - `multitrack`: Process all tracks separately and interleave results based on timestamps
 
 ### Multi-Tenant Design
+
 - Authentication via JWT tokens
 - Each JWT contains a configurable tenant key claim
 - Complete isolation between tenants (tenant A cannot access tenant B's resources)
 - All operations (jobs, results) are scoped to tenant
 
 ### Technology Stack
+
 - Python 3.11.11 with FastAPI
 - Pydantic for data validation and schema generation
 - Asynchronous API design
 - FFmpeg for media processing
 - OpenTelemetry for observability
 - Kubernetes deployment ready
+- Temporal for async jobs
 
 ### Pluggable Model Backends
+
 The service needs to support multiple Whisper implementations:
+
 1. WhisperX CPU - for CPU-based processing (uses faster-whisper under the hood)
 2. WhisperX CUDA - for NVIDIA GPUs
 3. Mock/Static backend - for testing (returns predetermined transcriptions)
 4. (Future) PyTorch or whisper.cpp - for AMD GPUs and Apple Metal (CTranslate2 might get ROCm and Metal/MPS support first)
 
 ### Configuration
+
 - Server-level backend selection (PyTorch Whisper, Faster Whisper, whisper.cpp, mock)
 - Server-level model size/path configuration
 - Runtime configuration for hardware acceleration (CUDA, ROCm, Metal, CPU)
@@ -156,18 +172,21 @@ The service needs to support multiple Whisper implementations:
 ## API Design
 
 ### Asynchronous Job Pattern
+
 - Submit transcription job → receive job ID
 - Poll for job completion using job ID
 - Jobs are created, accessed, and managed within tenant boundaries
 
 ### Endpoints
+
 The API should implement:
+
 1. Job submission endpoint
    - Takes media URL (audio or video - client manages storage/pre-signed URLs)
    - Returns job ID
    - Should handle various media formats (MP4, MKV, MP3, WAV, etc.)
-   
 2. Job status/result endpoint
+
    - Takes job ID
    - Returns status, errors, or completed transcription
 
@@ -175,7 +194,9 @@ The API should implement:
    - Reports backend availability, loaded models, etc.
 
 ### Request Parameters
+
 The job submission should accept:
+
 - Media URL (required)
 - Target language (optional, for translation)
 - Option for word-level timestamps (if supported by backend)
@@ -185,7 +206,9 @@ The job submission should accept:
 - Track selection index (when using `select` mode)
 
 ### Response Format
+
 The transcription result should include:
+
 - Full text transcription
 - Detected language
 - Segments with timestamps
@@ -194,42 +217,6 @@ The transcription result should include:
 - Word-level details (when available)
 - Rich error information when failures occur
 - Usage metrics (media duration, processing time)
-
-## Database Design
-
-### Job Queue Schema
-The service should use PostgreSQL for the job queue with:
-- Jobs table with appropriate indexes
-- SKIP LOCKED pattern for job claiming
-- Transactional safety for job status updates
-- Tenant isolation through schema design
-- Monitoring queries for queue health
-- Job retry and error tracking
-
-### Example Schema
-```sql
-CREATE TABLE jobs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    media_url TEXT NOT NULL,
-    processing_mode TEXT NOT NULL DEFAULT 'downmix',
-    track_index INTEGER,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    started_at TIMESTAMP WITH TIME ZONE,
-    completed_at TIMESTAMP WITH TIME ZONE,
-    worker_id TEXT,
-    retry_count INTEGER DEFAULT 0,
-    error JSON,
-    result JSON,
-    media_duration_seconds NUMERIC(10, 2),
-    processing_time_seconds NUMERIC(10, 2)
-);
-
-CREATE INDEX idx_jobs_status_tenant ON jobs (status, tenant_id, created_at) 
-    WHERE status = 'pending';
-```
 
 ### SQLAlchemy Type Checking with Pylance/mypy
 
@@ -241,12 +228,15 @@ stmt = select(Job).where(Job.state == JobState.PENDING)
 ```
 
 **Common Errors:**
+
 - "Variable not allowed in type expression" (with TypeVar bounds)
 - "Argument of type 'Column[X]' cannot be assigned to parameter of type 'X'"
-- "Type 'bool' is not assignable to type 'ColumnElement[bool]'" (in and_/or_ clauses)
+- "Type 'bool' is not assignable to type 'ColumnElement[bool]'" (in and*/or* clauses)
 
 **Best Solutions:**
+
 1. **Use cast() for SQLAlchemy expressions:**
+
    ```python
    # Explicit cast to ColumnElement[bool] for type checker
    pending_clause = cast(ColumnElement[bool], Job.state == JobState.PENDING)
@@ -254,12 +244,14 @@ stmt = select(Job).where(Job.state == JobState.PENDING)
    ```
 
 2. **Use explicit variable typing for runtime values:**
+
    ```python
    # When using Column attributes as values
    value = cast(int, job.attempt_count) + 1
    ```
 
 3. **For model definitions, avoid Column type annotations:**
+
    ```python
    # Don't do this - confuses type checkers:
    id: Column = Column(UUID(...))
@@ -270,8 +262,8 @@ stmt = select(Job).where(Job.state == JobState.PENDING)
 
 These patterns keep code type-safe while avoiding excessive type ignores or compromising on static analysis. SQLAlchemy 2.0 has improved typing support, but explicit casts are still often needed for complex expressions.
 
-
 ## Testing Requirements
+
 - Complete unit test coverage using the mock backend
 - Integration tests for each backend type
 - Environment-specific testing pipeline
@@ -280,6 +272,7 @@ These patterns keep code type-safe while avoiding excessive type ignores or comp
 ## Innovative Features
 
 ### Multitrack Transcription
+
 - Process multi-channel audio/video intelligently
 - Tag each segment with its source track ID
 - Interleave transcriptions from multiple tracks based on timestamps
@@ -289,6 +282,7 @@ These patterns keep code type-safe while avoiding excessive type ignores or comp
 ## Logging & Observability
 
 ### Structured Logging
+
 - JSON-formatted structured logs for all events
 - Use `structlog` as the primary logging library
 - Consistent log schema across all components
@@ -302,12 +296,14 @@ These patterns keep code type-safe while avoiding excessive type ignores or comp
   - `event` (the primary log message)
 
 ### Log Context Enrichment
+
 - Automatic context injection via FastAPI middleware
 - Request context variables (tenant, request ID)
 - Background task context tracking
 - Error and exception enrichment
 
 ### OpenTelemetry Integration
+
 - Optional integration with OpenTelemetry (configurable)
 - Distributed tracing across API requests and async processing when enabled
 - Metrics collection for service performance
@@ -316,6 +312,7 @@ These patterns keep code type-safe while avoiding excessive type ignores or comp
 - Correlation between logs and traces via trace/span IDs
 
 ### Usage Metrics
+
 - Track audio/video duration processed per request
 - Aggregate usage metrics by tenant
 - Include processing duration in API responses
@@ -323,7 +320,9 @@ These patterns keep code type-safe while avoiding excessive type ignores or comp
 - API endpoint for tenant usage statistics
 
 ### Startup Configuration
+
 The service should be configured at startup with:
+
 - Backend selection (PyTorch Whisper, Faster Whisper, whisper.cpp, mock)
 - Model size/path
 - Hardware acceleration settings (CUDA, ROCm, Metal, CPU)
@@ -332,6 +331,7 @@ The service should be configured at startup with:
 - Runtime constraints (threads, memory limits)
 
 ### Deployment Considerations
+
 - Kubernetes-ready configuration
 - Single container image with combined API and worker
 - Persistent volume for model storage
@@ -342,7 +342,9 @@ The service should be configured at startup with:
 - Readiness probe should verify both API and background task health
 
 ## Development Approach
+
 I'd like to implement this with well-structured, maintainable code that:
+
 - Uses Pydantic models for all data structures
 - Leverages FastAPI's dependency injection
 - Has clear separation of concerns
@@ -353,6 +355,7 @@ I'd like to implement this with well-structured, maintainable code that:
 - Handles worker failures and job retries gracefully
 
 ## Development Environment
+
 - Python 3.11.11
 - ASDF version manager
 - Poetry for dependency management
@@ -410,6 +413,7 @@ Remember that `DATABASE__DSN` format maps to nested config objects in our app co
 #### Required Dev Tools
 
 Make sure to run `./scripts/setup-dev.bash` to install all required developer tools:
+
 - asdf for Python version management
 - dotenvx for environment variable loading
 - tilt for local development environment
@@ -417,6 +421,7 @@ Make sure to run `./scripts/setup-dev.bash` to install all required developer to
 #### Development Scripts
 
 Instead of remembering complex commands, use our development scripts:
+
 - `./scripts/svc-up.bash` - Start the development environment
 - `./scripts/svc-down.bash` - Stop the development environment
 - `./scripts/check-config.py` - Verify configuration loading
@@ -426,3 +431,5 @@ Instead of remembering complex commands, use our development scripts:
 Please help me design this system with detailed implementation suggestions. Focus on good architecture patterns for the ML service backend, proper API design, and testing strategies.
 
 I want to understand every step as we go, so stop after semantically related steps and wait for me to prompt you to continue.
+
+Once you are done reading this document, tell me you're ready to get started.
